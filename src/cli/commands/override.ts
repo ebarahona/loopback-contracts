@@ -21,6 +21,7 @@ import {note} from '../prompts';
 import {ContractsComponent} from '../../contracts.component';
 import {
   ContractsEngineBindings,
+  DefaultProjectPaths,
   EjsTemplateEngine,
   InMemoryLossyReporter,
   InMemorySchemaRegistry,
@@ -155,11 +156,13 @@ export async function runOverride(opts: {
       paths,
     });
 
-    // All generators emit `EmittedFile.path` relative to `outputDir`
-    // (i.e. without a leading `src/` segment); the writer anchors them at
-    // `<projectRoot>/src`, matching `DefaultProjectPaths.outputDir`.
-    const outputRoot = resolve(opts.projectRoot, 'src');
-    const result = await writer.writeAll(outputRoot, emitted);
+    // All generators emit `EmittedFile.path` relative to `outputDir`;
+    // anchor them via `DefaultProjectPaths.outputDir` so any future config
+    // override (e.g. an `outputDir` field) is honoured instead of being
+    // silently bypassed by a hardcoded `'src'` segment. Mirrors the
+    // `validate.ts` / `gen.ts` wiring.
+    const projectPaths = new DefaultProjectPaths(opts.projectRoot, opts.config);
+    const result = await writer.writeAll(projectPaths.outputDir, emitted);
 
     if (result.skipped.length > 0) {
       const skipped = result.skipped[0] ?? '<unknown>';

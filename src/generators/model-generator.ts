@@ -135,6 +135,13 @@ export class ModelGenerator {
     const refImports = collectRefImports(schema, ctx, selfPath);
     const imports = mergeImports([...refImports, ...relationImports]);
 
+    // Dedupe relation-decorator imports: two relations of the same `kind`
+    // (e.g. two `hasMany`) would otherwise emit `import {..., hasMany,
+    // hasMany}` and trip TS2300 "Duplicate identifier". The template
+    // iterates `relationKinds` (deduped + sorted) instead of the raw
+    // `relations` array for the import line only.
+    const relationKinds = [...new Set(relations.map(r => r.kind))].sort();
+
     return {
       className,
       baseClass,
@@ -142,6 +149,7 @@ export class ModelGenerator {
       imports,
       properties,
       relations,
+      relationKinds,
     };
   }
 }

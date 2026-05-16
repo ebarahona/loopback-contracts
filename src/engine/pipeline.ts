@@ -1,19 +1,13 @@
 import {BindingScope, inject, injectable} from '@loopback/core';
 import {execFile} from 'node:child_process';
 import {randomBytes} from 'node:crypto';
-import {
-  mkdir,
-  readdir,
-  readFile,
-  rename,
-  unlink,
-  writeFile,
-} from 'node:fs/promises';
+import {mkdir, open, readdir, readFile, rename, unlink} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {promisify} from 'node:util';
 import Ajv2020 from 'ajv/dist/2020';
 import type {ErrorObject, ValidateFunction} from 'ajv';
+import createDebug from 'debug';
 
 import {
   ContractsCodegenError,
@@ -47,6 +41,7 @@ import {SourceResolverRegistry} from './source-resolver-registry';
 import {ContractsEngineBindings} from './tokens';
 
 const execFileAsync = promisify(execFile);
+const debug = createDebug('loopback:contracts:pipeline');
 
 /**
  * Input bundle the CLI hands {@link Pipeline.run}.
@@ -754,11 +749,18 @@ export class Pipeline {
 
   /**
    * Persist the next diff-state baseline atomically. Writes to a sibling
-   * tmp file in the same directory then `rename`s it into place — POSIX
-   * (and NTFS) guarantee `rename` within a directory is atomic, so a
-   * crash mid-write can never leave `diff-state.json` half-written and
-   * corrupt the next run's baseline. On any failure, a best-effort
-   * `unlink` clears the tmp; the original error is re-raised.
+   * tmp file in the same directory, `fsync`s the tmp for POSIX durability
+   * (mirroring `file-writer.ts:writeTmpDurable`), then `rename`s it into
+   * place — POSIX (and NTFS) guarantee `rename` within a directory is
+   * atomic, so a crash mid-write can never leave `diff-state.json`
+   * half-written and corrupt the next run's baseline. On any failure, a
+   * best-effort `unlink` clears the tmp; the original error is re-raised.
+   *
+   * The cache is rebuildable from the schema set, so a missing `fsync`
+   * implementation on the underlying filesystem (some network mounts,
+   * Windows ReFS) is not fatal — the call is wrapped and surfaced via the
+   * `debug` channel (`DEBUG=loopback:contracts:pipeline`) instead of
+   * thrown, matching `writeTmpDurable`'s policy.
    */
   private async persistDiffStateCache(
     opts: PipelineRunOptions,
@@ -767,8 +769,19 @@ export class Pipeline {
     const cachePath = diffStateCachePath(opts.projectRoot);
     await mkdir(dirname(cachePath), {recursive: true});
     const tmpPath = `${cachePath}.tmp.${randomBytes(6).toString('hex')}`;
+    const json = JSON.stringify(next, null, 2) + '\n';
     try {
-      await writeFile(tmpPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
+      const handle = await open(tmpPath, 'w');
+      try {
+        await handle.writeFile(json);
+        try {
+          await handle.sync();
+        } catch (err) {
+          debug('fsync unsupported on %s: %s', tmpPath, (err as Error).message);
+        }
+      } finally {
+        await handle.close();
+      }
       await rename(tmpPath, cachePath);
     } catch (err) {
       // Best-effort cleanup — never mask the original error.

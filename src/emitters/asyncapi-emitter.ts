@@ -63,6 +63,7 @@ export class AsyncAPIEmitter implements ProjectionEmitter<AsyncAPIPerSchemaOptio
       channelName: {type: 'string'},
       operationKind: {enum: ['send', 'receive']},
     },
+    additionalProperties: false,
   };
 
   emit(ctx: EmitterContext<AsyncAPIPerSchemaOptions>): EmittedFile[] {
@@ -138,6 +139,7 @@ function emitSchemaBody(
   renderCtx: RenderContext,
 ): void {
   const pad = ' '.repeat(indent);
+  reportCompositionIfPresent(schema, renderCtx);
   // `$ref` short-circuits every other keyword in JSON Schema (siblings are
   // ignored at validation time). Mirror that by emitting a single
   // `$ref` line pointing into the AsyncAPI `components.schemas` map so a
@@ -169,6 +171,19 @@ function emitSchemaBody(
   }
   if (typeof schema.format === 'string') {
     lines.push(`${pad}format: ${schema.format}`);
+  }
+  // `enum` is a first-class JSON Schema / AsyncAPI 3.0 keyword; without
+  // explicit emission it would otherwise be silently dropped by the walker.
+  // Render as a YAML block sequence of scalars; non-string values are
+  // serialized via `JSON.stringify` so booleans and numbers survive the
+  // round-trip without YAML-string ambiguity.
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) {
+    lines.push(`${pad}enum:`);
+    for (const v of schema.enum) {
+      const rendered =
+        typeof v === 'string' ? yamlString(v) : JSON.stringify(v);
+      lines.push(`${pad}  - ${rendered}`);
+    }
   }
 
   const required = Array.isArray(schema.required) ? schema.required : [];
@@ -230,6 +245,34 @@ function rewriteRef(ref: string): string {
   // `acme.user.v1` -> `AcmeUser`).
   const headId = id.replace(/\.v\d+$/, '');
   return `#/components/schemas/${toPascal(headId)}${fragment}`;
+}
+
+/**
+ * Surface JSON Schema composition keywords (`oneOf` / `anyOf` / `allOf`) that
+ * the YAML walker silently drops. AsyncAPI 3.0 inherits JSON Schema 2020-12
+ * composition in its schema sub-language; this emitter's hand-rolled walker
+ * doesn't project them, so the rendered fragment reflects only base
+ * `properties`/`type`/`items` with no operator signal.
+ */
+function reportCompositionIfPresent(
+  schema: JSONSchema,
+  renderCtx: RenderContext,
+): void {
+  if (
+    !Array.isArray(schema.oneOf) &&
+    !Array.isArray(schema.anyOf) &&
+    !Array.isArray(schema.allOf)
+  )
+    return;
+  renderCtx.lossy.report({
+    feature: 'asyncapi-composition-dropped',
+    severity: 'warn',
+    source: {schemaId: renderCtx.schemaId},
+    message:
+      'JSON Schema oneOf/anyOf/allOf composition is not projected to ' +
+      'AsyncAPI; the rendered output reflects only base ' +
+      'properties/type/items.',
+  });
 }
 
 function yamlString(s: string): string {

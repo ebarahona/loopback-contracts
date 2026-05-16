@@ -239,12 +239,15 @@ async function discoverSourceExtensions(
   projectRoot: string,
 ): Promise<readonly SourceExtension[]> {
   const app = new Application();
-  app.bind(ContractsEngineBindings.PROJECT_ROOT_TAG).to(projectRoot);
-  // `ContractsComponent` types its `providers` property more strictly than
-  // the LB4 `Component` interface; the structural mismatch is harmless for
-  // discovery (we only consume `findByTag`). Cast widens the constructor
-  // signature for `app.component` without weakening the runtime contract.
+  // Mount the component first so its source / engine bindings are in place
+  // before any runtime-valued singletons (mirrors `gen.ts` /
+  // `validate.ts`). `ContractsComponent` types its `providers` property
+  // more strictly than the LB4 `Component` interface; the structural
+  // mismatch is harmless for discovery (we only consume `findByTag`). Cast
+  // widens the constructor signature for `app.component` without
+  // weakening the runtime contract.
   app.component(ContractsComponent as unknown as Constructor<Component>);
+  app.bind(ContractsEngineBindings.PROJECT_ROOT_TAG).to(projectRoot);
   try {
     await app.start();
     // `Application.findByTag` only accepts a tag string / RegExp; passing a

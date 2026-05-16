@@ -138,6 +138,13 @@ const HELPERS: TemplateHelpers = {
 @injectable({scope: BindingScope.SINGLETON})
 export class EjsTemplateEngine implements TemplateEngine {
   private readonly cache = new Map<string, ejs.TemplateFunction>();
+  // In-flight read+compile promises keyed by absolute template path.
+  // Coalesces concurrent `preload` calls for the same path so the
+  // filesystem read and EJS compile each happen exactly once per path
+  // even when two `run()` invocations race (e.g. a long-lived host that
+  // shares a Pipeline between `validate` and `gen`). Entries are removed
+  // on settle — the cached `TemplateFunction` lives in `cache` instead.
+  private readonly inFlight = new Map<string, Promise<ejs.TemplateFunction>>();
 
   /**
    * @param templateRoot - Directory relative paths in `preload`/`render`
@@ -152,37 +159,72 @@ export class EjsTemplateEngine implements TemplateEngine {
    * once per pipeline run by `EmitterRunner` (with the union of every
    * enabled emitter's `templatePaths`) and by `Pipeline` (with the
    * generator templates) before any per-schema emit fires.
+   *
+   * Concurrent callers for the same path share a single in-flight
+   * read+compile via `inFlight`; the first caller starts the work,
+   * subsequent callers `await` the same promise, and the compiled
+   * function lands in `cache` on settle.
    */
   async preload(paths: readonly string[]): Promise<void> {
-    const fresh = paths
-      .map(p => this.toAbsolute(p))
-      .filter(abs => !this.cache.has(abs));
-    if (fresh.length === 0) return;
-    await Promise.all(
-      fresh.map(async abs => {
-        let source: string;
-        try {
-          source = await readFile(abs, 'utf8');
-        } catch (cause) {
-          throw new ContractsCodegenError(
-            `EJS template not readable: ${abs}`,
-            {emitterKind: 'template-engine', schemaId: '', outputPath: abs},
-            {cause},
-          );
-        }
-        let fn: ejs.TemplateFunction;
-        try {
-          fn = ejs.compile(source, {filename: abs, cache: false, async: false});
-        } catch (cause) {
-          throw new ContractsCodegenError(
-            `EJS template compile failed: ${abs}`,
-            {emitterKind: 'template-engine', schemaId: '', outputPath: abs},
-            {cause},
-          );
-        }
-        this.cache.set(abs, fn);
-      }),
-    );
+    const work: Promise<ejs.TemplateFunction>[] = [];
+    for (const p of paths) {
+      const abs = this.toAbsolute(p);
+      if (this.cache.has(abs)) continue;
+      const existing = this.inFlight.get(abs);
+      if (existing !== undefined) {
+        work.push(existing);
+        continue;
+      }
+      // Wrap the read+compile so the `inFlight` entry is dropped on
+      // settle (success OR failure) — a later `clear()` + retry must not
+      // see a stale promise. `cache.set` happens inside `readAndCompile`
+      // on success; we only own the in-flight bookkeeping here.
+      const promise = this.readAndCompile(abs).finally(() => {
+        this.inFlight.delete(abs);
+      });
+      this.inFlight.set(abs, promise);
+      work.push(promise);
+    }
+    if (work.length === 0) return;
+    await Promise.all(work);
+  }
+
+  /**
+   * Drop every cached compiled template. Intended for long-lived hosts
+   * that re-run the pipeline against different template sets (watch
+   * mode, the planned `loopback-contracts-import` runtime); not needed
+   * for one-shot CLI runs.
+   */
+  clear(): void {
+    this.cache.clear();
+  }
+
+  // Read + compile a single template. Used by `preload` under the
+  // `inFlight` coalescing guard. On success, populates `cache` so
+  // subsequent `render()` calls hit the synchronous in-memory path.
+  private async readAndCompile(abs: string): Promise<ejs.TemplateFunction> {
+    let source: string;
+    try {
+      source = await readFile(abs, 'utf8');
+    } catch (cause) {
+      throw new ContractsCodegenError(
+        `EJS template not readable: ${abs}`,
+        {emitterKind: 'template-engine', schemaId: '', outputPath: abs},
+        {cause},
+      );
+    }
+    let fn: ejs.TemplateFunction;
+    try {
+      fn = ejs.compile(source, {filename: abs, cache: false, async: false});
+    } catch (cause) {
+      throw new ContractsCodegenError(
+        `EJS template compile failed: ${abs}`,
+        {emitterKind: 'template-engine', schemaId: '', outputPath: abs},
+        {cause},
+      );
+    }
+    this.cache.set(abs, fn);
+    return fn;
   }
 
   render(templatePath: string, viewModel: object): string {

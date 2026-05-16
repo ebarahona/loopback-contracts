@@ -93,6 +93,7 @@ export class AvroEmitter implements ProjectionEmitter<AvroPerSchemaOptions> {
       doc: {type: 'string'},
       aliases: {type: 'array', items: {type: 'string'}},
     },
+    additionalProperties: false,
   };
 
   emit(ctx: EmitterContext<AvroPerSchemaOptions>): EmittedFile[] {
@@ -210,6 +211,7 @@ function jsonSchemaToAvroType(
   fieldName: string,
   convertCtx: ConvertContext,
 ): AvroType {
+  reportCompositionIfPresent(prop, fieldName, convertCtx);
   // `$ref` MUST be handled before `type` — JSON Schema lets a node carry
   // both keywords, but in practice `$ref` wins and other keywords are
   // ignored at validation time. Mirror that here so a referenced record
@@ -227,6 +229,22 @@ function jsonSchemaToAvroType(
 
   const t = Array.isArray(prop.type) ? prop.type[0] : prop.type;
   if (Array.isArray(prop.enum) && prop.enum.length > 0) {
+    // Avro `enum` symbols MUST be strings. If the source enum mixes types
+    // (e.g., `['a', 1, true]`), `String()`-coerce each value and surface a
+    // single lossy report so the operator sees the cross-type collapse —
+    // `sanitizeEnumSymbol` only reports invalid-symbol rewrites, not type
+    // coercion of legal-but-non-string values.
+    const hasNonString = prop.enum.some(v => typeof v !== 'string');
+    if (hasNonString) {
+      reportLossy(convertCtx, {
+        feature: 'avro-enum-mixed-type-coerced',
+        severity: 'warn',
+        source: {schemaId: convertCtx.schemaId, propertyPath: fieldName},
+        message:
+          'Avro enum requires uniform string symbols; non-string values ' +
+          'were String()-coerced.',
+      });
+    }
     return {
       type: 'enum',
       name: `${toPascal(fieldName)}Enum`,
@@ -390,6 +408,33 @@ function sanitizeEnumSymbol(
 
 function reportLossy(convertCtx: ConvertContext, report: LossyReport): void {
   convertCtx.lossy.report(report);
+}
+
+/**
+ * Surface JSON Schema composition keywords (`oneOf` / `anyOf` / `allOf`) that
+ * Avro can't represent. The hand-rolled walker collapses to base
+ * `type`/`properties`/`items`; without this hook the dropped composition is
+ * silent. Reports once per node so a deep tree doesn't spam the operator.
+ */
+function reportCompositionIfPresent(
+  prop: JSONSchema,
+  fieldName: string,
+  convertCtx: ConvertContext,
+): void {
+  if (
+    !Array.isArray(prop.oneOf) &&
+    !Array.isArray(prop.anyOf) &&
+    !Array.isArray(prop.allOf)
+  )
+    return;
+  reportLossy(convertCtx, {
+    feature: 'avro-composition-dropped',
+    severity: 'warn',
+    source: {schemaId: convertCtx.schemaId, propertyPath: fieldName},
+    message:
+      'JSON Schema oneOf/anyOf/allOf composition is not projected to Avro; ' +
+      'the rendered output reflects only base properties/type/items.',
+  });
 }
 
 /**

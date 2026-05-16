@@ -32,7 +32,6 @@
 import {inject, Getter} from '@loopback/core';
 import {
   DefaultCrudRepository,
-  juggler,
   repository,
 <% factoryImports.forEach(function(f, i){ -%>
   <%- f %><%- (i === factoryImports.length - 1 && factoryTypeImports.length === 0) ? '' : ',' %>

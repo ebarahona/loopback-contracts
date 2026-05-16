@@ -255,6 +255,7 @@ const MODEL_VIEW = {
       fieldDecl: '?: OrderBase[]',
     },
   ],
+  relationKinds: ['hasMany'],
 };
 
 /** Repository fixture: exercises relations, factoryImports, factoryTypeImports. */

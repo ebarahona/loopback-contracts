@@ -171,12 +171,12 @@ async function collectFilesWithSymlinkGuard(
         // Re-canonicalise after `stat` to close a TOCTOU window: between the
         // initial `realpath` and now, the target could have been re-pointed
         // at a path outside the boundary by a racing actor. Re-check before
-        // we descend or read.
+        // we descend or read — narrows the race window to nanoseconds.
         const resolvedAfterStat = await realpath(target);
         if (!isWithin(resolvedAfterStat, boundary)) {
           throw new ContractsSourceError(
-            `symlink escape detected: '${full}' -> '${resolvedAfterStat}' is outside project root '${boundary}'`,
-            {scheme, uri},
+            'symlink target moved during stat — refusing to follow (TOCTOU)',
+            {scheme, uri: target},
           );
         }
         if (info.isDirectory()) {

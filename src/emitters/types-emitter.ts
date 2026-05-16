@@ -93,7 +93,10 @@ export class TypesEmitter implements ProjectionEmitter {
       additionalProperties = true;
       ctx.lossy.report({
         feature: 'types-additional-properties-flattened',
-        source: {schemaId: String(schemaId)},
+        source: {
+          schemaId: String(schemaId),
+          propertyPath: '/additionalProperties',
+        },
         severity: 'warn',
         message:
           `Source schema declares 'additionalProperties' as an object ` +

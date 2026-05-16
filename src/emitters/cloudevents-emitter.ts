@@ -69,6 +69,7 @@ export class CloudEventsEmitter implements ProjectionEmitter<CloudEventsPerSchem
       subject: {type: 'string'},
     },
     required: ['type'],
+    additionalProperties: false,
   };
 
   emit(ctx: EmitterContext<CloudEventsPerSchemaOptions>): EmittedFile[] {

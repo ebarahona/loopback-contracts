@@ -339,6 +339,10 @@ function runGit(args: string[], cwd: string): Promise<GitResult> {
       // hung clone over a half-open TCP socket is reaped immediately.
       child.kill('SIGKILL');
     }, timeoutMs);
+    // Unref so a hung clone cannot keep the event loop alive between
+    // `controller.abort()` and the child's `close` event — matches the
+    // unref'd timer pattern used by other sources.
+    timer.unref();
 
     const child = spawn('git', args, {
       cwd,

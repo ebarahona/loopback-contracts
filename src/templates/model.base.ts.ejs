@@ -9,6 +9,11 @@
  *   imports            Array<{specifier, names: string[], typeOnly: boolean}>
  *   properties         Array<PropertyView>
  *   relations          Array<RelationView>
+ *   relationKinds      string[]                deduped+sorted list of every
+ *                                              `kind` in `relations` (used by
+ *                                              the relation-decorator import
+ *                                              line to avoid TS2300 when two
+ *                                              relations share a `kind`)
  *
  * PropertyView:
  *   name           string
@@ -25,7 +30,7 @@
  *   keyFromLiteral string  raw `{keyFrom: '...'}` options or "" when none
  */
 -%>
-import {<%- baseClass %>, model, property<% relations.forEach(function(r){ -%>, <%- r.kind %><% }); %>} from '@loopback/repository';
+import {<%- baseClass %>, model, property<% relationKinds.forEach(function(k){ -%>, <%- k %><% }); %>} from '@loopback/repository';
 <% imports.forEach(function(imp){ -%>
 import <% if (imp.typeOnly) { -%>type <% } -%>{<%- imp.names.join(', ') %>} from '<%- imp.specifier %>';
 <% }); -%>

@@ -110,6 +110,7 @@ function jsonSchemaToGqlType(
   propertyName: string,
   mapCtx: GqlMapContext,
 ): string {
+  reportCompositionIfPresent(schema, propertyName, mapCtx);
   const format = typeof schema.format === 'string' ? schema.format : undefined;
   if (format && mapCtx.scalars && mapCtx.scalars[format]) {
     return mapCtx.scalars[format] as string;
@@ -240,6 +241,7 @@ export class GraphQLEmitter implements ProjectionEmitter<GraphQLPerSchemaOptions
       sdl: {type: 'boolean'},
       scalars: {type: 'object', additionalProperties: {type: 'string'}},
     },
+    additionalProperties: false,
   };
 
   emit(ctx: EmitterContext<GraphQLPerSchemaOptions>): EmittedFile[] {
@@ -292,6 +294,7 @@ export class GraphQLEmitter implements ProjectionEmitter<GraphQLPerSchemaOptions
 }
 
 function buildFields(schema: JSONSchema, mapCtx: GqlMapContext): FieldView[] {
+  reportCompositionIfPresent(schema, '', mapCtx);
   const properties = schema.properties ?? {};
   const required = new Set(schema.required ?? []);
   const fields: FieldView[] = [];
@@ -312,6 +315,37 @@ function buildFields(schema: JSONSchema, mapCtx: GqlMapContext): FieldView[] {
     });
   }
   return fields;
+}
+
+/**
+ * Surface JSON Schema composition keywords (`oneOf` / `anyOf` / `allOf`) that
+ * GraphQL can't model directly. GraphQL `union`s combine object types, not
+ * scalars; `interface`s express shared field-sets, not algebraic sums. The
+ * hand-rolled walker collapses to base properties/type/items without these
+ * keywords, so without this report the operator gets a silently incomplete
+ * SDL.
+ */
+function reportCompositionIfPresent(
+  schema: JSONSchema,
+  propertyName: string,
+  mapCtx: GqlMapContext,
+): void {
+  if (
+    !Array.isArray(schema.oneOf) &&
+    !Array.isArray(schema.anyOf) &&
+    !Array.isArray(schema.allOf)
+  )
+    return;
+  const propertyPath = propertyName === '' ? '' : `/properties/${propertyName}`;
+  mapCtx.lossy.report({
+    feature: 'graphql-composition-dropped',
+    severity: 'warn',
+    source: {schemaId: mapCtx.schemaId, propertyPath},
+    message:
+      'JSON Schema oneOf/anyOf/allOf composition is not projected to ' +
+      'GraphQL; the rendered output reflects only base ' +
+      'properties/type/items.',
+  });
 }
 
 function renderSdl(

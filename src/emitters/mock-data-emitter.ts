@@ -10,6 +10,7 @@ import type {
   EmittedFile,
   EmitterContext,
   JSONSchema,
+  LossyReporter,
   ProjectionEmitter,
   SchemaRegistry,
 } from '../interfaces';
@@ -72,6 +73,7 @@ export class MockDataEmitter implements ProjectionEmitter<MockDataPerSchemaOptio
       seed: {type: 'integer'},
       count: {type: 'integer', default: 1},
     },
+    additionalProperties: false,
   };
 
   emit(ctx: EmitterContext<MockDataPerSchemaOptions>): EmittedFile[] {
@@ -107,7 +109,12 @@ export class MockDataEmitter implements ProjectionEmitter<MockDataPerSchemaOptio
       // file/HTTP resolver), which produces flaky behaviour and can hang the
       // pipeline on offline runs. Resolution uses {@link SchemaRegistry} so
       // the result mirrors what other emitters see.
-      const prepared = prepareSchemaForFaker(ctx.schema, ctx.registry);
+      const prepared = prepareSchemaForFaker(
+        ctx.schema,
+        ctx.registry,
+        schemaId,
+        ctx.lossy,
+      );
       samples.push(faker.generate(prepared as unknown));
     }
 
@@ -146,12 +153,15 @@ export class MockDataEmitter implements ProjectionEmitter<MockDataPerSchemaOptio
 function prepareSchemaForFaker(
   schema: JSONSchema,
   registry: SchemaRegistry,
+  schemaId: string,
+  lossy: LossyReporter,
 ): JSONSchema {
   const seen = new Set<string>();
   function resolve(node: unknown): unknown {
     if (!node || typeof node !== 'object') return node;
     if (Array.isArray(node)) return node.map(resolve);
     const obj = node as Record<string, unknown>;
+    reportMockCompositionIfPresent(obj, schemaId, lossy);
     if (typeof obj['$ref'] === 'string') {
       const refId = obj['$ref'];
       if (seen.has(refId)) return {};
@@ -167,6 +177,36 @@ function prepareSchemaForFaker(
     return out;
   }
   return resolve(schema) as JSONSchema;
+}
+
+/**
+ * Surface JSON Schema composition keywords (`oneOf` / `anyOf` / `allOf`)
+ * encountered while walking the schema. `json-schema-faker` accepts them in
+ * principle, but the engine's pre-resolution walker collapses to base
+ * properties/type/items, so any composition branches are dropped from the
+ * fixture without operator signal. The report names the source schema; the
+ * exact in-document path is not tracked (the walker has no path-stack).
+ */
+function reportMockCompositionIfPresent(
+  obj: Record<string, unknown>,
+  schemaId: string,
+  lossy: LossyReporter,
+): void {
+  if (
+    !Array.isArray(obj['oneOf']) &&
+    !Array.isArray(obj['anyOf']) &&
+    !Array.isArray(obj['allOf'])
+  )
+    return;
+  lossy.report({
+    feature: 'mock-data-composition-dropped',
+    severity: 'warn',
+    source: {schemaId},
+    message:
+      'JSON Schema oneOf/anyOf/allOf composition is not projected to ' +
+      'mock-data fixtures; the rendered output reflects only base ' +
+      'properties/type/items.',
+  });
 }
 
 /**

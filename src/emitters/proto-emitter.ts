@@ -12,6 +12,7 @@ import type {
   EmittedFile,
   EmitterContext,
   JSONSchema,
+  LossyReporter,
   ProjectionEmitter,
 } from '../interfaces';
 import {ContractsBindings} from '../keys';
@@ -74,6 +75,7 @@ export class ProtoEmitter implements ProjectionEmitter<ProtoPerSchemaOptions> {
       javaPackage: {type: 'string'},
       goPackage: {type: 'string'},
     },
+    additionalProperties: false,
   };
 
   async emit(
@@ -111,7 +113,7 @@ export class ProtoEmitter implements ProjectionEmitter<ProtoPerSchemaOptions> {
         source: {schemaId, propertyPath: ''},
         message: `quicktype could not project schema '${schemaId}' to protobuf (${message}); using hand-rolled fallback (no $ref resolution, no cycle detection — see proto-emitter.ts:283-293 for parity gap).`,
       });
-      proto = renderHandRolled(ctx.schema, messageName);
+      proto = renderHandRolled(ctx.schema, messageName, schemaId, ctx.lossy);
     }
 
     const normalized = ensureProto3Header(proto, pkg, options);
@@ -295,12 +297,19 @@ function ensureProto3Header(
 // speculatively. When that report lands, port `avro-emitter::resolveRef`
 // + `buildInlineRecord` + the `visited: Map` plumbing into a
 // `ConvertContext` here.
-function renderHandRolled(schema: JSONSchema, messageName: string): string {
+function renderHandRolled(
+  schema: JSONSchema,
+  messageName: string,
+  schemaId: string,
+  lossy: LossyReporter,
+): string {
+  reportProtoCompositionIfPresent(schema, '', schemaId, lossy);
   const props = schema.properties ?? {};
   const required = new Set(schema.required ?? []);
   const lines: string[] = [`message ${messageName} {`];
   let fieldNum = 1;
   for (const [name, prop] of Object.entries(props)) {
+    reportProtoCompositionIfPresent(prop, name, schemaId, lossy);
     const protoType = jsonSchemaToProtoType(prop);
     const repeated = prop.type === 'array' ? 'repeated ' : '';
     const optionalMarker = required.has(name) || repeated ? '' : 'optional ';
@@ -311,6 +320,35 @@ function renderHandRolled(schema: JSONSchema, messageName: string): string {
   }
   lines.push('}');
   return lines.join('\n');
+}
+
+/**
+ * Surface JSON Schema composition keywords (`oneOf` / `anyOf` / `allOf`) that
+ * the hand-rolled proto walker silently drops. proto3 lacks a generic
+ * sum-type encoding (`oneof` only covers field-level alternation, not
+ * arbitrary schema composition), so the rendered `.proto` would otherwise
+ * reflect only base `properties`/`type`/`items` with no operator signal.
+ */
+function reportProtoCompositionIfPresent(
+  prop: JSONSchema,
+  propertyPath: string,
+  schemaId: string,
+  lossy: LossyReporter,
+): void {
+  if (
+    !Array.isArray(prop.oneOf) &&
+    !Array.isArray(prop.anyOf) &&
+    !Array.isArray(prop.allOf)
+  )
+    return;
+  lossy.report({
+    feature: 'proto-composition-dropped',
+    severity: 'warn',
+    source: {schemaId, propertyPath},
+    message:
+      'JSON Schema oneOf/anyOf/allOf composition is not projected to proto; ' +
+      'the rendered output reflects only base properties/type/items.',
+  });
 }
 
 function jsonSchemaToProtoType(prop: JSONSchema): string {

@@ -81,9 +81,7 @@ async function runOnce(
   const spin = spinner();
   spin.start(`Running ${PIPELINE_STAGES}-stage pipeline`);
 
-  const pipeline = await app.get<Pipeline>(
-    'platform.contracts.engine.pipeline',
-  );
+  const pipeline = await app.get<Pipeline>(ContractsEngineBindings.PIPELINE);
 
   try {
     const result = await pipeline.run({
@@ -121,9 +119,7 @@ async function runWatchMode(
   opts: {projectRoot: string; config: LoopbackConfigJson},
   flags: ParsedFlags,
 ): Promise<number> {
-  const pipeline = await app.get<Pipeline>(
-    'platform.contracts.engine.pipeline',
-  );
+  const pipeline = await app.get<Pipeline>(ContractsEngineBindings.PIPELINE);
 
   // Construct the watcher and install signal handlers BEFORE the first
   // iteration runs. A long initial pipeline (e.g. a large schema set on a
@@ -317,13 +313,6 @@ async function bootstrap(
       return map;
     })
     .inScope(BindingScope.SINGLETON);
-
-  // Bind the engine-internal `Pipeline` token alias so the CLI can
-  // `app.get()` via the documented public key without depending on the
-  // concrete class binding.
-  app
-    .bind('platform.contracts.engine.pipeline')
-    .toAlias(ContractsEngineBindings.PIPELINE);
 
   // `ManifestEmitterBooter`'s lifecycle is owned by `ContractsComponent`
   // (added via `createBindingFromClass(...)` with `lifeCycleObserver`

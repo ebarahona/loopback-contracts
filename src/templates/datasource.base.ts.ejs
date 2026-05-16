@@ -22,7 +22,7 @@ export class <%- Name %>BaseDataSource
 
   constructor(
     @inject('datasources.config.<%- name %>', {optional: true})
-    dsConfig: object = config,
+    dsConfig: Record<string, unknown> = config,
   ) {
     super(dsConfig);
   }
