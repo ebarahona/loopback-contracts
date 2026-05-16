@@ -1,0 +1,16 @@
+<%
+const Name = name;
+const description_ = description || '';
+%>import {Field, Float, ID, Int, ObjectType} from 'type-graphql';
+
+<% if (description_) { %>/**
+ * <%- h.escapeComment(description_) %>
+ */
+<% } %>@ObjectType(<% if (description_) { %>{description: '<%- h.escapeStr(description_) %>'}<% } %>)
+export class <%- Name %> {
+<% fields.forEach(function (f) { %>
+<% if (f.description) { %>  /** <%- h.escapeComment(f.description) %> */
+<% } %>  @Field(() => <%- f.gqlType %><% if (!f.required) { %>, {nullable: true}<% } %>)
+  <%- f.name %><% if (!f.required) { %>?<% } %>: <%- f.tsType %>;
+
+<% }); %>}

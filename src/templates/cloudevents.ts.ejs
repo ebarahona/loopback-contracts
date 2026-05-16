@@ -1,0 +1,38 @@
+<%
+const Name = name;
+const eventType_ = eventType;
+const typesImport_ = typesImport;
+%>import {CloudEvent} from 'cloudevents';
+import type {<%- Name %>} from '<%- typesImport_ %>';
+
+/**
+ * Typed CloudEvent envelope carrying a `<%- Name %>` payload.
+ */
+export type <%- Name %>Event = CloudEvent<<%- Name %>>;
+
+/**
+ * Init shape for {@link create<%- Name %>Event}. `type` is pinned to the
+ * declared `x-cloudevents.type`; consumers supply `source` / `subject` /
+ * `data` per emit.
+ */
+export interface <%- Name %>EventInit {
+  type: '<%- h.escapeStr(eventType_) %>';
+  source: string;
+  subject?: string;
+  data: <%- Name %>;
+  datacontenttype?: 'application/json';
+  time?: string;
+  id?: string;
+}
+
+/**
+ * Factory for a fully-typed `<%- Name %>Event`. Fills in `specversion: '1.0'`
+ * and defaults `datacontenttype` to `application/json` when omitted.
+ */
+export function create<%- Name %>Event(init: <%- Name %>EventInit): <%- Name %>Event {
+  return new CloudEvent<<%- Name %>>({
+    ...init,
+    specversion: '1.0',
+    datacontenttype: init.datacontenttype ?? 'application/json',
+  });
+}

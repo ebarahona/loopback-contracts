@@ -1,0 +1,54 @@
+name: release-please
+
+# Auto-runs on every push to main. release-please opens / updates a
+# rolling release PR collecting Conventional Commit entries; merging
+# that PR triggers a tag + npm publish on the next push.
+# workflow_dispatch retained for manual re-runs (e.g. token rotation
+# trial publishes).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Checkout
+        if: ${{ steps.release.outputs.release_created }}
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        if: ${{ steps.release.outputs.release_created }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+          always-auth: true
+
+      - name: Install dependencies
+        if: ${{ steps.release.outputs.release_created }}
+        run: rm -f package-lock.json && npm install --include=optional --no-audit --no-fund
+
+      - name: Build
+        if: ${{ steps.release.outputs.release_created }}
+        run: npm run build
+
+      - name: Publish to npm
+        if: ${{ steps.release.outputs.release_created }}
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

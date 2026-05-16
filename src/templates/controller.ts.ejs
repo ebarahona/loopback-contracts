@@ -1,0 +1,10 @@
+<%
+const Name = name;
+%>import {<%- Name %>BaseController} from './<%- h.kebab(Name) %>.base.controller';
+
+/**
+ * User-editable extension of the generated `<%- Name %>BaseController`. Add
+ * custom routes or override base methods here; this file is written once and
+ * never regenerated.
+ */
+export class <%- Name %>Controller extends <%- Name %>BaseController {}

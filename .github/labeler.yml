@@ -1,0 +1,46 @@
+engine:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/engine/**/*'
+
+emitters:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/emitters/**/*'
+
+sources:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/sources/**/*'
+
+cli:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/cli/**/*'
+
+interfaces:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/interfaces/**/*'
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/__tests__/**/*'
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'README.md'
+          - '*.md'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/**/*'
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'package.json'
+          - 'package-lock.json'

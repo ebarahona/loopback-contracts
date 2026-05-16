@@ -1,0 +1,169 @@
+<%
+// `Name` is bound by the generator to the *base* model class name (e.g.
+// `CustomerBase`), so every type reference below resolves against the
+// always-emitted base file even when the user has not yet run
+// `lb4 override controller`. `controllerName` keeps the bare PascalCase
+// stem (e.g. `Customer`) used for the controller class declaration, the
+// URL prefix, and local variable / repository field names.
+const Name           = name;
+const ControllerName = controllerName;
+const Plural         = h.plural(ControllerName); // e.g. Customers
+const route          = '/' + h.kebab(Plural);    // e.g. /customers
+const varName        = h.camel(ControllerName);  // e.g. customer
+const repoVar        = varName + 'Repository';
+const idType         = idType_;                  // 'string' | 'number'
+const idDecor        = idType === 'number' ? 'number' : 'string';
+%>import {
+  Count,
+  CountSchema,
+  Filter,
+  FilterExcludingWhere,
+  repository,
+  Where,
+} from '@loopback/repository';
+import {
+  post,
+  param,
+  get,
+  getModelSchemaRef,
+  patch,
+  put,
+  del,
+  requestBody,
+  response,
+} from '@loopback/rest';
+import {<%- Name %>} from '../models/<%- h.kebab(ControllerName) %>.base.model';
+import {<%- Name %>Repository} from '../repositories/<%- h.kebab(ControllerName) %>.base.repository';
+
+/**
+ * Auto-generated base controller for the `<%- ControllerName %>` contract.
+ * Exposes the default seven-method LB4 CRUD surface. Do not edit; rerun
+ * `lb4 gen`.
+ *
+ * @internal
+ */
+export class <%- ControllerName %>BaseController {
+  constructor(
+    @repository(<%- Name %>Repository)
+    public <%- repoVar %>: <%- Name %>Repository,
+  ) {}
+<% if (isPublic) { %>
+  @post('<%- route %>')
+  @response(200, {
+    description: '<%- Name %> model instance',
+    content: {'application/json': {schema: getModelSchemaRef(<%- Name %>)}},
+  })
+  async create(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: getModelSchemaRef(<%- Name %>, {
+            title: 'New<%- Name %>',
+            exclude: ['<%- idProperty %>'],
+          }),
+        },
+      },
+    })
+    <%- varName %>: Omit<<%- Name %>, '<%- idProperty %>'>,
+  ): Promise<<%- Name %>> {
+    return this.<%- repoVar %>.create(<%- varName %>);
+  }
+
+  @get('<%- route %>/count')
+  @response(200, {
+    description: '<%- Name %> model count',
+    content: {'application/json': {schema: CountSchema}},
+  })
+  async count(
+    @param.where(<%- Name %>) where?: Where<<%- Name %>>,
+  ): Promise<Count> {
+    return this.<%- repoVar %>.count(where);
+  }
+
+  @get('<%- route %>')
+  @response(200, {
+    description: 'Array of <%- Name %> model instances',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'array',
+          items: getModelSchemaRef(<%- Name %>, {includeRelations: true}),
+        },
+      },
+    },
+  })
+  async find(
+    @param.filter(<%- Name %>) filter?: Filter<<%- Name %>>,
+  ): Promise<<%- Name %>[]> {
+    return this.<%- repoVar %>.find(filter);
+  }
+
+  @patch('<%- route %>')
+  @response(200, {
+    description: '<%- Name %> PATCH success count',
+    content: {'application/json': {schema: CountSchema}},
+  })
+  async updateAll(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: getModelSchemaRef(<%- Name %>, {partial: true}),
+        },
+      },
+    })
+    <%- varName %>: <%- Name %>,
+    @param.where(<%- Name %>) where?: Where<<%- Name %>>,
+  ): Promise<Count> {
+    return this.<%- repoVar %>.updateAll(<%- varName %>, where);
+  }
+
+  @get('<%- route %>/{<%- idProperty %>}')
+  @response(200, {
+    description: '<%- Name %> model instance',
+    content: {
+      'application/json': {
+        schema: getModelSchemaRef(<%- Name %>, {includeRelations: true}),
+      },
+    },
+  })
+  async findById(
+    @param.path.<%- idDecor %>('<%- idProperty %>') id: <%- idType %>,
+    @param.filter(<%- Name %>, {exclude: 'where'})
+    filter?: FilterExcludingWhere<<%- Name %>>,
+  ): Promise<<%- Name %>> {
+    return this.<%- repoVar %>.findById(id, filter);
+  }
+
+  @patch('<%- route %>/{<%- idProperty %>}')
+  @response(204, {description: '<%- Name %> PATCH success'})
+  async updateById(
+    @param.path.<%- idDecor %>('<%- idProperty %>') id: <%- idType %>,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: getModelSchemaRef(<%- Name %>, {partial: true}),
+        },
+      },
+    })
+    <%- varName %>: <%- Name %>,
+  ): Promise<void> {
+    await this.<%- repoVar %>.updateById(id, <%- varName %>);
+  }
+
+  @put('<%- route %>/{<%- idProperty %>}')
+  @response(204, {description: '<%- Name %> PUT success'})
+  async replaceById(
+    @param.path.<%- idDecor %>('<%- idProperty %>') id: <%- idType %>,
+    @requestBody() <%- varName %>: <%- Name %>,
+  ): Promise<void> {
+    await this.<%- repoVar %>.replaceById(id, <%- varName %>);
+  }
+
+  @del('<%- route %>/{<%- idProperty %>}')
+  @response(204, {description: '<%- Name %> DELETE success'})
+  async deleteById(
+    @param.path.<%- idDecor %>('<%- idProperty %>') id: <%- idType %>,
+  ): Promise<void> {
+    await this.<%- repoVar %>.deleteById(id);
+  }
+<% } %>}

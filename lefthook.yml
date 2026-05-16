@@ -1,0 +1,23 @@
+# https://lefthook.dev
+#
+# Primary git hook runner (parallel, staged-files-aware). Zero-dependency
+# fallback is .githooks/{pre-commit,commit-msg}. Parity between the two
+# paths is enforced by src/__tests__/unit/hook-parity.spec.ts.
+pre-commit:
+  parallel: true
+  commands:
+    eslint:
+      glob: '*.{ts,tsx}'
+      run: npx eslint --fix {staged_files}
+      stage_fixed: true
+    prettier:
+      glob: '*.{ts,tsx,json,md,yml,yaml}'
+      run: npx prettier --write {staged_files}
+      stage_fixed: true
+    typecheck:
+      glob: '*.{ts,tsx}'
+      run: npx tsc --noEmit -p tsconfig.json
+commit-msg:
+  commands:
+    commitlint:
+      run: npx --no -- commitlint --edit {1}

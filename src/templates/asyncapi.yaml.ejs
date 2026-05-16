@@ -1,0 +1,15 @@
+# AsyncAPI 3.0 message fragment — mount under your top-level spec's
+# `components.messages` / `components.schemas` sections.
+asyncapi: 3.0.0
+components:
+  schemas:
+<%- schemaYaml %>  messages:
+    <%- Name %>Message:
+      name: <%- Name %>
+      title: <%- title %>
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/<%- Name %>'
+<% if (channelName) { %>      bindings: {}
+<% } %><% if (operationKind) { %>      x-operation-kind: <%- operationKind %>
+<% } %>

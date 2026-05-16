@@ -1,0 +1,27 @@
+<%
+/**
+ * Extension model template — written once on `lb4 override model <name>`.
+ *
+ * View-model fields:
+ *   className       string  e.g. "Customer"
+ *   baseImportPath  string  relative path to the regenerated base file
+ *                            (no `.ts` suffix)
+ */
+-%>
+import {<%- className %>Base} from '<%- baseImportPath %>';
+
+/**
+ * Hand-editable extension of {@link <%- className %>Base}.
+ *
+ * The base class is regenerated on every `lb4 gen` run from the authored
+ * `schemas/<%- h.kebab(className) %>.schema.json` + `configs/<%- h.kebab(className) %>.config.json`.
+ * Add custom methods, computed properties, or overrides here; this file is
+ * never overwritten by codegen.
+ *
+ * @public
+ */
+export class <%- className %> extends <%- className %>Base {
+  constructor(data?: Partial<<%- className %>>) {
+    super(data);
+  }
+}

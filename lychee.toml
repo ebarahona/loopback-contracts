@@ -1,0 +1,23 @@
+# Configuration for lycheeverse/lychee-action
+# https://lychee.cli.rs/usage/config/
+
+max_redirects = 5
+max_retries = 2
+timeout = 20
+include_verbatim = false
+
+exclude = [
+  # GitHub link patterns that 200/302 but rate-limit aggressively
+  '^https://github\.com/.+/(issues|pull|security|releases)/.*$',
+  # Local file references inside fenced code blocks that aren't actual URLs
+  '^file://',
+]
+
+exclude_path = [
+  "node_modules",
+  "dist",
+  ".husky/_",
+]
+
+cache = true
+max_cache_age = "1d"

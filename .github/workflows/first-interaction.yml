@@ -1,0 +1,41 @@
+name: First interaction
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  greeting:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Greet first-time contributor
+        uses: actions/first-interaction@3c71ce730280171fd1cfb57c00c774f8998586f7 # v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-message: |
+            Thanks for opening your first issue here.
+
+            A few pointers so reviewers can act on it quickly:
+
+            - Please follow [`.github/ISSUE_TEMPLATE/bug_report.yml`](../blob/main/.github/ISSUE_TEMPLATE/bug_report.yml) or [`feature_request.yml`](../blob/main/.github/ISSUE_TEMPLATE/feature_request.yml) — fill in every required section.
+            - For bugs, include a minimal reproduction (transport adapter config + handler/client wiring + the failing call), the broker/server version (Kafka, RabbitMQ, gRPC, MQTT, NATS, etc.), and the Node version.
+            - Security-sensitive issues should go through GitHub private vulnerability reporting per [`SECURITY.md`](../blob/main/SECURITY.md), not as a public issue.
+            - Claude Code users: there are seven project skills under [`.claude/skills/`](../tree/main/.claude/skills) that automate repro scaffolding, triage, and review tasks.
+
+            See [`CONTRIBUTING.md`](../blob/main/CONTRIBUTING.md) and [`STYLE_GUIDE.md`](../blob/main/STYLE_GUIDE.md) for the project conventions.
+          pr-message: |
+            Thanks for opening your first PR here.
+
+            Before reviewers can dig in:
+
+            - Every commit needs a [DCO sign-off](https://developercertificate.org/) (`git commit -s`).
+            - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/). The changelog generator only picks up `feat`, `fix`, `perf`, `deps`, and `docs` types.
+            - `npm run lint && npm run build && npm test` should all pass locally. Claude Code users can run `/pre-pr-check` to validate in one step, and the seven skills under [`.claude/skills/`](../tree/main/.claude/skills) cover the most common review and scaffolding tasks.
+
+            See [`CONTRIBUTING.md`](../blob/main/CONTRIBUTING.md) and [`STYLE_GUIDE.md`](../blob/main/STYLE_GUIDE.md).

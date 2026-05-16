@@ -1,0 +1,164 @@
+{
+  "name": "@ebarahona/loopback-contracts",
+  "version": "0.1.0",
+  "description": "JSON Schema-driven contract substrate for LoopBack 4 — emits LB4 model/repository/controller/datasource plus sidecars (Zod, TypeScript types, GraphQL, CloudEvents, AsyncAPI, Protocol Buffers, Avro, OpenAPI components, mock fixtures).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && npm run build:templates",
+    "build:templates": "node scripts/copy-templates.mjs",
+    "clean": "rimraf dist",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "vitest run",
+    "test:unit": "vitest run src/__tests__/unit",
+    "test:integration": "vitest run src/__tests__/integration",
+    "test:dev": "vitest",
+    "commitlint": "commitlint --edit",
+    "prepare": "sh scripts/install-hooks.sh",
+    "prepublishOnly": "npm run clean && npm run build",
+    "bench": "node bench/index.mjs",
+    "docs": "typedoc",
+    "cli": "node bin/lb-contracts.js"
+  },
+  "bin": {
+    "lb-contracts": "./bin/lb-contracts.js"
+  },
+  "keywords": [
+    "loopback",
+    "loopback4",
+    "loopback4 extension",
+    "extension",
+    "contracts",
+    "json-schema",
+    "codegen",
+    "zod",
+    "graphql",
+    "cloudevents",
+    "asyncapi",
+    "protobuf",
+    "avro",
+    "openapi",
+    "contract-first"
+  ],
+  "author": "Ed Barahona (https://github.com/ebarahona)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ebarahona/loopback-contracts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ebarahona/loopback-contracts/issues"
+  },
+  "homepage": "https://github.com/ebarahona/loopback-contracts#readme",
+  "peerDependencies": {
+    "@loopback/core": ">=7.0.0 <8.0.0",
+    "@loopback/metadata": ">=8.0.0 <9.0.0",
+    "cloudevents": ">=10.0.0 <11.0.0",
+    "json-schema-faker": "^0.5.6",
+    "json-schema-to-typescript": ">=15.0.0 <16.0.0",
+    "json-schema-to-zod": ">=2.0.0 <3.0.0",
+    "quicktype-core": ">=23.0.0 <24.0.0",
+    "zod": ">=3.22.0 <5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "cloudevents": {
+      "optional": true
+    },
+    "json-schema-faker": {
+      "optional": true
+    },
+    "json-schema-to-typescript": {
+      "optional": true
+    },
+    "json-schema-to-zod": {
+      "optional": true
+    },
+    "quicktype-core": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "chokidar": "^4.0.3",
+    "debug": "^4.4.0",
+    "ejs": "^3.1.10",
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.0.1",
+    "@commitlint/config-conventional": "^21.0.1",
+    "@loopback/core": "^7.0.12",
+    "@loopback/metadata": "^8.0.12",
+    "@loopback/repository": "^8.0.12",
+    "@loopback/rest": "^15.0.13",
+    "@size-limit/preset-small-lib": "^11.0.0",
+    "@types/debug": "^4.1.12",
+    "@types/ejs": "^3.1.5",
+    "@types/node": "^25.7.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.3",
+    "@typescript-eslint/parser": "^8.59.3",
+    "cloudevents": ">=10.0.0 <11.0.0",
+    "eslint": "^10.3.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import-x": "^4.16.2",
+    "eslint-plugin-tsdoc": "^0.5.2",
+    "json-schema-faker": "^0.5.6",
+    "json-schema-to-typescript": ">=15.0.0 <16.0.0",
+    "json-schema-to-zod": ">=2.0.0 <3.0.0",
+    "lefthook": "^2.1.6",
+    "prettier": "^3.2.0",
+    "quicktype-core": ">=23.0.0 <24.0.0",
+    "rimraf": "^6.0.1",
+    "size-limit": "^11.0.0",
+    "tinybench": "^3.1.1",
+    "tsx": "^4.19.2",
+    "typedoc": "^0.28.19",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6",
+    "yaml": "^2.9.0",
+    "zod": ">=3.22.0 <5.0.0"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "size-limit": [
+    {
+      "name": "dist (CommonJS)",
+      "path": "dist/index.js",
+      "limit": "100 KB",
+      "ignore": [
+        "@loopback/core",
+        "@loopback/metadata",
+        "ajv",
+        "ajv-formats",
+        "ejs",
+        "chokidar",
+        "jsonc-parser",
+        "@clack/prompts",
+        "debug"
+      ]
+    }
+  ]
+}

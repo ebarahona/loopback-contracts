@@ -1,0 +1,63 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: 'Etc/UTC'
+    open-pull-requests-limit: 10
+    versioning-strategy: increase-if-necessary
+    labels:
+      - dependencies
+    commit-message:
+      prefix: deps
+      include: scope
+    groups:
+      loopback:
+        patterns:
+          - '@loopback/*'
+      eslint:
+        patterns:
+          - 'eslint'
+          - '@typescript-eslint/*'
+          - 'eslint-*'
+      vitest:
+        patterns:
+          - 'vitest'
+          - '@vitest/*'
+      commitlint:
+        patterns:
+          - '@commitlint/*'
+      ajv:
+        patterns:
+          - 'ajv'
+          - 'ajv-formats'
+      quicktype:
+        patterns:
+          - 'quicktype-core'
+      schemas:
+        patterns:
+          - 'json-schema-to-zod'
+          - 'json-schema-to-typescript'
+          - 'json-schema-faker'
+      types:
+        patterns:
+          - '@types/*'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: friday
+      time: '06:00'
+      timezone: 'Etc/UTC'
+    open-pull-requests-limit: 5
+    versioning-strategy: increase-if-necessary
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: ci
+      include: scope

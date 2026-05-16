@@ -1,0 +1,24 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/index.ts"],
+  "entryPointStrategy": "expand",
+  "tsconfig": "tsconfig.build.json",
+  "out": "docs-site",
+  "name": "@ebarahona/loopback-contracts",
+  "readme": "README.md",
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeInternal": true,
+  "categorizeByGroup": true,
+  "includeVersion": true,
+  "githubPages": true,
+  "navigationLinks": {
+    "GitHub": "https://github.com/ebarahona/loopback-contracts",
+    "Style Guide": "https://github.com/ebarahona/loopback-contracts/blob/main/STYLE_GUIDE.md"
+  },
+  "validation": {
+    "notExported": true,
+    "invalidLink": true,
+    "notDocumented": false
+  }
+}

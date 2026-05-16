@@ -1,0 +1,29 @@
+<%
+const Name = h.pascal(name);
+%>import {inject, lifeCycleObserver, LifeCycleObserver} from '@loopback/core';
+import {juggler} from '@loopback/repository';
+
+const config = <%- configLiteral %>;
+
+/**
+ * Auto-generated base datasource for `<%- name %>`. Reads adapter + connection
+ * options from `datasources.json`; environment-variable placeholders of the
+ * form `${VAR}` are interpolated against `process.env` at load time.
+ *
+ * @internal
+ */
+@lifeCycleObserver('datasource')
+export class <%- Name %>BaseDataSource
+  extends juggler.DataSource
+  implements LifeCycleObserver
+{
+  static readonly dataSourceName = '<%- name %>';
+  static readonly defaultConfig = config;
+
+  constructor(
+    @inject('datasources.config.<%- name %>', {optional: true})
+    dsConfig: object = config,
+  ) {
+    super(dsConfig);
+  }
+}

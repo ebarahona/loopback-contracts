@@ -1,0 +1,23 @@
+<%
+/**
+ * Extension repository template — written once on
+ * `lb4 override repository <name>`.
+ *
+ * View-model fields:
+ *   className       string  e.g. "Customer"
+ *   baseImportPath  string  relative path to the regenerated base file
+ *                            (no `.ts` suffix)
+ */
+-%>
+import {<%- className %>BaseRepository} from '<%- baseImportPath %>';
+
+/**
+ * Hand-editable extension of {@link <%- className %>BaseRepository}.
+ *
+ * The base class is regenerated on every `lb4 gen` run. Add custom finders,
+ * transaction helpers, or override CRUD methods here; this file is never
+ * overwritten by codegen.
+ *
+ * @public
+ */
+export class <%- className %>Repository extends <%- className %>BaseRepository {}

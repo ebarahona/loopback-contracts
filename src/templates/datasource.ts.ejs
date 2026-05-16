@@ -1,0 +1,11 @@
+<%
+const Name = h.pascal(name);
+const kebab = h.kebab(name);
+%>import {<%- Name %>BaseDataSource} from './<%- kebab %>.base.datasource';
+
+/**
+ * User-editable extension of the generated `<%- Name %>BaseDataSource`. Add
+ * lifecycle hooks (`start()`, `stop()`) or override defaults here; this file
+ * is written once and never regenerated.
+ */
+export class <%- Name %>DataSource extends <%- Name %>BaseDataSource {}

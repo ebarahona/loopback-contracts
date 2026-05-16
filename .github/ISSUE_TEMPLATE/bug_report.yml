@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a defect in @ebarahona/loopback-contracts.
+title: 'bug: '
+labels:
+  - bug
+  - needs-triage
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Short description
+      description: One or two sentences describing the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Steps to reproduce the bug.
+      placeholder: |
+        Provide a minimal reproduction:
+        - Transport adapter and configuration (redact credentials)
+        - Handler and/or client wiring (decorators, controller, registry usage)
+        - Message payload and routing key / topic / subject
+        - The failing call and any inputs
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        - Transport adapter (Kafka / RabbitMQ / gRPC / MQTT / NATS / other):
+        - Broker / server version:
+        - @ebarahona/loopback-contracts version:
+        - Node version:
+        - OS:
+    validations:
+      required: true
+  - type: textarea
+    id: stack-trace
+    attributes:
+      label: Stack trace
+      description: Full stack trace, if available.
+      render: text
+    validations:
+      required: false
