@@ -110,13 +110,18 @@ describe('CLI end-to-end (init -> contract -> gen)', () => {
     // ---- init ----
     // Queue answers in the exact order init.ts consumes them:
     //   text(projectName), text(schemasDir), text(configsDir),
-    //   select(sourceKind), select(validator), multiselect(emits)
+    //   select(sourceKind), select(validator), select(moduleFormat),
+    //   multiselect(emits)
+    //
+    // Note: select(importExtension) only fires when moduleFormat === 'esm';
+    // 'default' bypasses it.
     answers.push(
       'cli-test', // projectName
       './schemas', // schemasDir
       './configs', // configsDir
       'none', // sourceKind
       'ajv', // validator
+      'default', // moduleFormat (CJS — skips importExtension prompt)
       ['zod', 'types'], // multiselect emits
     );
     const initExit = await runInit({projectRoot: ROOT, argv: []});

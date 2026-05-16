@@ -6,9 +6,16 @@
 // existing internal imports keep compiling.
 
 export type {
+  EmitValue,
   LoopbackConfigJson,
   MigrationStrategy,
   SchemaSourceDescriptor,
+} from './interfaces/loopback-config.interface';
+
+export {
+  getEmitEsm,
+  getEmitImportExtension,
+  isEmitterEnabled,
 } from './interfaces/loopback-config.interface';
 
 export type {LossyReporter} from './interfaces/lossy-reporter.interface';

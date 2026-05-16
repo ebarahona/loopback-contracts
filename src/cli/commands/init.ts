@@ -54,6 +54,14 @@ type GitAuth = 'ssh' | 'token' | 'public';
 type ValidatorKind = 'ajv' | 'zod';
 
 /**
+ * Value type for entries in the `emit` map. Sidecar-emitter toggles are
+ * booleans; reserved keys carry typed string values (e.g. `importExtension`
+ * is `.js` / `.ts` / `''`). Mirrors the widened shape landing in a parallel
+ * wave — kept local so this file type-checks independently.
+ */
+type EmitValue = boolean | '.js' | '.ts' | '';
+
+/**
  * Canonical multi-select labels for the nine built-in sidecar emitters, in
  * the exact wording shown in the doc's "Project initialization (lb4 init)"
  * section. Third-party emitter contributions discovered through the registry
@@ -162,6 +170,32 @@ export async function runInit(opts: RunInitOptions): Promise<number> {
       ],
     });
 
+    const moduleFormat = await select<'default' | 'esm'>({
+      message: 'Module format for generated code?',
+      options: [
+        {
+          label: 'Default emit mode (recommended for CJS LB4 apps)',
+          value: 'default',
+        },
+        {label: 'ESM-strict (for ESM-only consumers)', value: 'esm'},
+      ],
+    });
+
+    let importExtension: '.js' | '.ts' | '' = '.js';
+    if (moduleFormat === 'esm') {
+      importExtension = await select<'.js' | '.ts' | ''>({
+        message: 'Import extension?',
+        options: [
+          {label: '.js (Node, ts-node, tsc-emitted output)', value: '.js'},
+          {
+            label: '.ts (Deno / TypeScript with allowImportingTsExtensions)',
+            value: '.ts',
+          },
+          {label: 'extensionless (bundler resolution)', value: ''},
+        ],
+      });
+    }
+
     const emitterKinds = await discoverEmitterKinds();
     const emitOptions = emitterKinds.map(meta => ({
       label: BUILTIN_EMIT_LABELS[meta.kind] ?? defaultLabel(meta),
@@ -174,6 +208,16 @@ export async function runInit(opts: RunInitOptions): Promise<number> {
       initialValues: [],
     });
 
+    const emit: Record<string, EmitValue> = buildEmitMap(
+      emitterKinds,
+      selectedEmits,
+    );
+    if (moduleFormat === 'esm') {
+      emit.esm = true;
+      // Default `.js` is documented — omit the key to keep the config minimal.
+      if (importExtension !== '.js') emit.importExtension = importExtension;
+    }
+
     const config = buildConfigDocument({
       name: projectName,
       schemasDir,
@@ -181,7 +225,7 @@ export async function runInit(opts: RunInitOptions): Promise<number> {
       validator,
       schemas:
         remoteEntry === undefined ? [schemasDir] : [schemasDir, remoteEntry],
-      emit: buildEmitMap(emitterKinds, selectedEmits),
+      emit,
     });
 
     const spin = spinner();
@@ -331,9 +375,9 @@ function defaultLabel(meta: EmitterMetadata): string {
 function buildEmitMap(
   emitterKinds: readonly EmitterMetadata[],
   selected: readonly string[],
-): Record<string, boolean> {
+): Record<string, EmitValue> {
   const selectedSet = new Set(selected);
-  const emit: Record<string, boolean> = {};
+  const emit: Record<string, EmitValue> = {};
   for (const meta of emitterKinds) emit[meta.kind] = selectedSet.has(meta.kind);
   return emit;
 }
@@ -351,7 +395,7 @@ function buildConfigDocument(input: {
   readonly configsDir: string;
   readonly validator: ValidatorKind;
   readonly schemas: readonly string[];
-  readonly emit: Record<string, boolean>;
+  readonly emit: Record<string, EmitValue>;
 }): string {
   let doc = '{}';
   const apply = (path: (string | number)[], value: unknown): void => {

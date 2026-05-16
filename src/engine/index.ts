@@ -22,8 +22,11 @@ export {SourceResolverRegistry} from './source-resolver-registry';
 export {
   buildDatasourcesMetaSchema,
   buildEmitterManifestMetaSchema,
+  buildLoopbackConfigMetaSchema,
   buildModelConfigMetaSchema,
 } from './meta-schema-generator';
 export {Pipeline} from './pipeline';
 export type {PipelineResult, PipelineRunOptions, StageNumber} from './pipeline';
 export {ContractsEngineBindings} from './tokens';
+export {ModuleFormatTransformer} from './module-format-transformer';
+export type {ModuleFormatTransformerOptions} from './module-format-transformer';

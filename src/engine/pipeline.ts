@@ -31,6 +31,7 @@ import {EmitterRegistry} from './emitter-registry';
 import {EmitterRunner} from './emitter-runner';
 import {FileWriter} from './file-writer';
 import {InMemoryLossyReporter} from './lossy-reporter';
+import {ModuleFormatTransformer} from './module-format-transformer';
 import {
   buildDatasourcesMetaSchema,
   buildEmitterManifestMetaSchema,
@@ -79,6 +80,19 @@ export interface PipelineRunOptions {
    * `lb-contracts validate --stage <N>` to scope the run.
    */
   readonly maxStage?: StageNumber;
+  /**
+   * Module-format options resolved from CLI flags + `loopback.config.json`.
+   * When `esm: true`, the engine inserts a {@link ModuleFormatTransformer}
+   * pass between emitter output and FileWriter that rewrites relative
+   * imports/exports to append `importExtension`, narrows type-only imports
+   * via inline modifiers, and rejects any CJS syntax. Defaults to off.
+   *
+   * @see contracts-extensibility.md §"Module-format choice".
+   */
+  readonly moduleFormat?: {
+    readonly esm?: boolean;
+    readonly importExtension?: '.js' | '.ts' | '';
+  };
 }
 
 /**
@@ -792,6 +806,8 @@ export class Pipeline {
 
   // ----- Stage 7 -------------------------------------------------------
 
+  // (Helper used by stage 7c.5; defined as a file-scope function below.)
+
   private async stage7Codegen(opts: PipelineRunOptions): Promise<{
     readonly created: readonly string[];
     readonly updated: readonly string[];
@@ -818,6 +834,13 @@ export class Pipeline {
       );
     }
 
+    // Stage 7c.5 — engine-owned module-format normalisation. Runs BEFORE
+    // the FileWriter so header banner / hashing / collision / write-policy
+    // act on the final bytes. ESM mode rewrites relative imports/exports,
+    // narrows type-only imports, and rejects CJS syntax. Default mode is
+    // pass-through. See contracts-extensibility.md §"Module-format choice".
+    const transformedFiles = applyModuleFormat(files, opts.moduleFormat);
+
     // Stage 7d — the single atomic commit point. Emitter output is
     // rooted at `paths.outputDir`; queued meta-schemas (which live at
     // `paths.root/_meta`) anchor at `paths.root` via the per-file root
@@ -826,7 +849,10 @@ export class Pipeline {
     // either rolls back everything (phase 1) or leaves a rare,
     // well-described partial state (phase 2) covering both roots,
     // preserving the no-partial-writes guarantee across the two anchors.
-    const allFiles: readonly EmittedFile[] = [...files, ...this.writeQueue];
+    const allFiles: readonly EmittedFile[] = [
+      ...transformedFiles,
+      ...this.writeQueue,
+    ];
     const perFileRoots = new Map<string, string>();
     for (const meta of this.writeQueue) {
       perFileRoots.set(meta.path, this.paths.root);
@@ -1293,4 +1319,26 @@ async function listConfigFiles(configsDir: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+/**
+ * Apply the engine-owned module-format transform to emitter output.
+ *
+ * Returns the input slice unchanged when ESM mode is off (the default),
+ * which keeps the no-op path zero-cost — `ts-morph` is never required.
+ * When `esm: true`, constructs a single {@link ModuleFormatTransformer}
+ * per run (it's cheap to allocate; the project doesn't share state
+ * between runs).
+ *
+ * @internal
+ */
+function applyModuleFormat(
+  files: readonly EmittedFile[],
+  moduleFormat: PipelineRunOptions['moduleFormat'],
+): readonly EmittedFile[] {
+  const esm = moduleFormat?.esm === true;
+  if (!esm) return files;
+  const importExtension = moduleFormat?.importExtension ?? '.js';
+  const transformer = new ModuleFormatTransformer({esm: true, importExtension});
+  return transformer.transform(files);
 }

@@ -153,6 +153,105 @@ export function buildDatasourcesMetaSchema(
 }
 
 /**
+ * Build `_meta/loopback-config.schema.json` — the meta-schema validating
+ * the per-project `loopback.config.json`. The `emit` property mixes
+ * boolean per-emitter toggles (one slot per registered `kind`) with two
+ * reserved string-valued module-format keys (`esm`, `importExtension`)
+ * documented on {@link LoopbackConfigJson.emit}.
+ *
+ * Representation note — the natural shape
+ * `additionalProperties\: \{type\: boolean\}` would conflict with the
+ * string-typed `importExtension` reserved key. We resolve the conflict
+ * the JSON Schema 2020-12 way: list the two reserved keys explicitly
+ * under `properties` (with their narrow string/boolean schemas), then
+ * leave `additionalProperties` on `emit` constrained to boolean to
+ * govern the open-ended per-emitter slots. Per spec §10.3.2.3
+ * `additionalProperties` only applies to keys NOT present in
+ * `properties` (and not matching `patternProperties`), so the reserved
+ * string slot is exempt and keeps its narrow type.
+ *
+ * The `emitterKinds` enum (when non-empty) constrains the unknown
+ * boolean slots so a typo like `emit.zodd` fails meta-schema
+ * validation instead of silently disabling the intended emitter.
+ *
+ * @internal
+ */
+export function buildLoopbackConfigMetaSchema(
+  emitterKinds: readonly string[] = [],
+): JSONSchema {
+  const knownKinds = [...new Set(emitterKinds)].sort();
+  const emitProperties: Record<string, JSONSchema> = {
+    esm: {
+      type: 'boolean',
+      default: false,
+      description:
+        'Opt the project into ESM-strict output. Emitters that branch on module format read this via getEmitEsm().',
+    },
+    importExtension: {
+      type: 'string',
+      enum: ['.js', '.ts', ''],
+      default: '.js',
+      description:
+        "Suffix appended to relative imports in emitted code when ESM mode is on. '.js' is Node's canonical ESM form; '.ts' targets tools that resolve TypeScript suffixes at runtime; '' targets non-Node ESM hosts.",
+    },
+  };
+  // One explicit boolean slot per known emitter kind keeps the meta-
+  // schema's diagnostic precise: a typo on a known kind is rejected
+  // by the property-level type, not just the open additionalProperties
+  // catch-all.
+  for (const kind of knownKinds) {
+    emitProperties[kind] = {type: 'boolean'};
+  }
+  return {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://ebarahona.dev/loopback-contracts/_meta/loopback-config.schema.json',
+    title: 'LoopBack 4 contracts loopback.config.json (generated)',
+    type: 'object',
+    additionalProperties: true,
+    required: [
+      'name',
+      'schemasDir',
+      'configsDir',
+      'validator',
+      'schemas',
+      'emit',
+    ],
+    properties: {
+      $schema: {type: 'string'},
+      name: {type: 'string', minLength: 1},
+      schemasDir: {type: 'string', minLength: 1},
+      configsDir: {type: 'string', minLength: 1},
+      validator: {type: 'string', enum: ['ajv', 'zod']},
+      schemas: {type: 'array', items: {type: 'string'}},
+      emit: {
+        type: 'object',
+        // Per JSON Schema 2020-12 §10.3.2.3 `additionalProperties`
+        // applies only to keys NOT covered by `properties` /
+        // `patternProperties`, so the reserved string-valued
+        // `importExtension` slot listed in `properties` is exempt
+        // from this boolean constraint while every other key (a
+        // per-emitter `kind` toggle) must be a boolean.
+        additionalProperties: {type: 'boolean'},
+        properties: emitProperties,
+      },
+      'config-bindings': {type: 'array'},
+      'migration-strategy': {
+        type: 'object',
+        additionalProperties: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['mode'],
+          properties: {
+            mode: {type: 'string', enum: ['allow', 'fail']},
+            note: {type: 'string'},
+          },
+        },
+      },
+    },
+  };
+}
+
+/**
  * Build `_meta/emitter.schema.json` — the meta-schema validating manifest-
  * based emitters declared inside the project (the `kinds` enum is empty
  * because manifest emitters declare their own `kind`; the engine validates

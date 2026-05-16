@@ -8,6 +8,7 @@ export type {
   ContractsValidator,
   EmittedFile,
   EmitterContext,
+  EmitValue,
   ExtensionKeywordHandler,
   ImportMap,
   JSONSchema,
@@ -29,6 +30,12 @@ export type {
   TemplateEngine,
   ValidationResult,
   ValidatorContext,
+} from './interfaces';
+
+export {
+  getEmitEsm,
+  getEmitImportExtension,
+  isEmitterEnabled,
 } from './interfaces';
 
 export {ContractsBindings} from './keys';

@@ -1,4 +1,22 @@
 /**
+ * Value type for entries in {@link LoopbackConfigJson.emit}. Most entries
+ * are boolean toggles keyed by emitter `kind`; two reserved keys carry
+ * module-format metadata:
+ *
+ *   - `emit.esm` — boolean, opts the project into ESM-strict output.
+ *   - `emit.importExtension` — string, one of `.js` | `.ts` | `''`, sets
+ *     the suffix appended to relative imports in emitted code.
+ *
+ * The widened union keeps the meta-schema and the runtime helpers in
+ * lock-step: any consumer reading `emit[kind]` as a boolean must first
+ * narrow via {@link isEmitterEnabled} (or an explicit `=== true` check)
+ * so the reserved string slot never leaks into a boolean branch.
+ *
+ * @public
+ */
+export type EmitValue = boolean | '.js' | '.ts' | '';
+
+/**
  * Top-level shape of `loopback.config.json` — the per-project entry point
  * the `lb4 init` command writes and `lb4 gen` reads on every run.
  *
@@ -20,10 +38,14 @@ export interface LoopbackConfigJson {
   /** Schema-source URIs the engine fetches on every run. */
   readonly schemas: readonly SchemaSourceDescriptor[];
   /**
-   * Per-emitter enable flags. Keys match `ProjectionEmitter.kind` of
-   * registered emitters; unknown keys fail meta-schema validation.
+   * Per-emitter enable flags plus two reserved module-format slots
+   * (`esm`, `importExtension`). Boolean entries are keyed by
+   * `ProjectionEmitter.kind`; the reserved string-valued
+   * `importExtension` slot must be read with
+   * {@link getEmitImportExtension}. Unknown keys fail meta-schema
+   * validation.
    */
-  readonly emit: Readonly<Record<string, boolean>>;
+  readonly emit: Readonly<Record<string, EmitValue>>;
   /**
    * Optional `loopback-config` integration — additional `@configClass`
    * bindings to register alongside generated artefacts.
@@ -63,4 +85,46 @@ export interface MigrationStrategy {
   readonly mode: 'allow' | 'fail';
   /** Free-form note recorded in the run report for auditing. */
   readonly note?: string;
+}
+
+/**
+ * Read whether an emitter `kind` is enabled. Returns false for missing
+ * keys and for any non-boolean value (e.g. the reserved
+ * `emit.importExtension` slot), so callers can iterate the map freely
+ * without having to filter the reserved string-valued entries first.
+ *
+ * @public
+ */
+export function isEmitterEnabled(
+  emit: Readonly<Record<string, EmitValue>>,
+  kind: string,
+): boolean {
+  return emit[kind] === true;
+}
+
+/**
+ * Read the ESM mode flag. Defaults to `false` when missing or invalid —
+ * projects opt in explicitly; an absent or malformed entry is treated as
+ * the CommonJS default.
+ *
+ * @public
+ */
+export function getEmitEsm(emit: Readonly<Record<string, EmitValue>>): boolean {
+  return emit['esm'] === true;
+}
+
+/**
+ * Read the import-extension setting for ESM mode. Defaults to `'.js'`
+ * when missing or invalid; valid values are `'.js'` (the Node ESM
+ * canonical form), `'.ts'` (for tools that resolve TypeScript suffixes
+ * at runtime), and `''` (extensionless, for non-Node ESM hosts).
+ *
+ * @public
+ */
+export function getEmitImportExtension(
+  emit: Readonly<Record<string, EmitValue>>,
+): '.js' | '.ts' | '' {
+  const v = emit['importExtension'];
+  if (v === '.js' || v === '.ts' || v === '') return v;
+  return '.js';
 }

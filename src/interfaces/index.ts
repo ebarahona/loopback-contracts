@@ -26,9 +26,16 @@ export type {
 } from './emitter-context.interface';
 
 export type {
+  EmitValue,
   LoopbackConfigJson,
   MigrationStrategy,
   SchemaSourceDescriptor,
+} from './loopback-config.interface';
+
+export {
+  getEmitEsm,
+  getEmitImportExtension,
+  isEmitterEnabled,
 } from './loopback-config.interface';
 
 export type {LossyReporter} from './lossy-reporter.interface';

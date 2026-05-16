@@ -11,11 +11,20 @@ import {
   EjsTemplateEngine,
   RelativeImportMap,
 } from '../../engine';
-import type {Pipeline, PipelineResult} from '../../engine';
+import type {Pipeline, PipelineResult, PipelineRunOptions} from '../../engine';
 import {ContractsEngineBindings} from '../../engine/tokens';
-import type {ImportMap, SchemaRegistry} from '../../interfaces';
+import {
+  getEmitEsm,
+  getEmitImportExtension,
+  type ImportMap,
+  type SchemaRegistry,
+} from '../../interfaces';
 import {ContractsBindings} from '../../keys';
-import type {LoopbackConfigJson} from '../../types';
+import type {EmitValue, LoopbackConfigJson} from '../../types';
+
+/** Valid values for `--import-extension`. */
+const VALID_IMPORT_EXTENSIONS = ['.js', '.ts', ''] as const;
+type ImportExtension = (typeof VALID_IMPORT_EXTENSIONS)[number];
 
 /* eslint-disable no-console */
 
@@ -32,7 +41,8 @@ const PIPELINE_STAGES = 8;
  *
  * Bootstraps a one-off LB4 {@link Application} wired with
  * {@link ContractsComponent}, parses the gen-specific flags (including the
- * nine `--emit-<kind>` and matching `--no-emit-<kind>` overrides, plus
+ * nine `--emit-<kind>` and matching `--no-emit-<kind>` overrides, the ESM
+ * trio `--esm` / `--no-esm` / `--import-extension=<.js|.ts|>`, plus
  * `--watch` / `dev`-mode), invokes the pipeline once, and either exits or
  * keeps a debounced chokidar watcher running on every authored source file.
  *
@@ -84,14 +94,7 @@ async function runOnce(
   const pipeline = await app.get<Pipeline>(ContractsEngineBindings.PIPELINE);
 
   try {
-    const result = await pipeline.run({
-      projectRoot: opts.projectRoot,
-      config: applyPerSchemaOverrides(opts.config, flags),
-      emitFlags: mergeEmitFlags(opts.config, flags),
-      strict: flags.strict,
-      allowBreaking: flags.allowBreaking,
-      skipTsc: flags.skipTsc,
-    });
+    const result = await pipeline.run(buildRunOptions(opts, flags));
     spin.stop(
       `Pipeline complete (${result.stagesRun}/${PIPELINE_STAGES} stages)`,
     );
@@ -216,14 +219,7 @@ async function runWatchIteration(
     // guarantees we render only the current iteration's lossy entries
     // without depending on private engine reset semantics or holding a
     // reporter reference whose interface does not expose a `clear()`.
-    const result = await pipeline.run({
-      projectRoot: opts.projectRoot,
-      config: applyPerSchemaOverrides(opts.config, flags),
-      emitFlags: mergeEmitFlags(opts.config, flags),
-      strict: flags.strict,
-      allowBreaking: flags.allowBreaking,
-      skipTsc: flags.skipTsc,
-    });
+    const result = await pipeline.run(buildRunOptions(opts, flags));
     console.log(
       `[${stamp()}] OK: wrote ${result.filesWritten.length} files ` +
         `(stages ${result.stagesRun}/${PIPELINE_STAGES}, ` +
@@ -356,6 +352,9 @@ const KNOWN_LITERAL_FLAGS: ReadonlySet<string> = new Set([
   '--skip-tsc',
   '--verbose',
   '--emit-graphql-sdl',
+  '--esm',
+  '--no-esm',
+  '--import-extension',
 ]);
 
 interface ParsedFlags {
@@ -367,6 +366,18 @@ interface ParsedFlags {
   readonly graphqlSdl: boolean;
   /** Map of emitter kind to override (`true` enable, `false` disable). */
   readonly emitOverrides: Readonly<Record<string, boolean>>;
+  /**
+   * Tri-state ESM mode override:
+   *   - `true`  → `--esm` was passed (force ESM on, overrides config)
+   *   - `false` → `--no-esm` was passed (force ESM off, overrides config)
+   *   - `undefined` → neither flag was passed (fall through to config / default)
+   */
+  readonly esm: boolean | undefined;
+  /**
+   * `--import-extension=<value>` override, or `undefined` when the flag
+   * wasn't passed. Empty string is a valid value (bundler resolution).
+   */
+  readonly importExtension: ImportExtension | undefined;
 }
 
 function parseFlags(argv: readonly string[]): ParsedFlags {
@@ -376,6 +387,8 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
   let skipTsc = false;
   let verbose = false;
   let graphqlSdl = false;
+  let esm: boolean | undefined;
+  let importExtension: ImportExtension | undefined;
   const emitOverrides: Record<string, boolean> = {};
 
   // The dispatcher invokes us with either `gen [...args]` or `dev [...args]`;
@@ -389,7 +402,10 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     args.shift();
   }
 
-  for (const arg of args) {
+  // Index loop (not `for…of`) so `--import-extension <value>` can consume
+  // the next argv slot when used in space-separated form.
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] as string;
     if (arg === '--watch') {
       watchMode = true;
       continue;
@@ -414,6 +430,36 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
       graphqlSdl = true;
       // SDL implies the graphql emitter itself is on.
       emitOverrides['graphql'] = true;
+      continue;
+    }
+    if (arg === '--esm') {
+      esm = true;
+      continue;
+    }
+    if (arg === '--no-esm') {
+      esm = false;
+      continue;
+    }
+    // `--import-extension=<value>` (joined) — empty string is valid.
+    if (arg.startsWith('--import-extension=')) {
+      const raw = arg.slice('--import-extension='.length);
+      importExtension = validateImportExtension(raw);
+      continue;
+    }
+    // `--import-extension <value>` (space-separated). The next token is
+    // the value even if it looks like another flag — explicit empty must
+    // use the `=` form (`--import-extension=`).
+    if (arg === '--import-extension') {
+      const next = args[i + 1];
+      if (next === undefined) {
+        throw new TypeError(
+          "--import-extension requires a value (.js, .ts, or '' for " +
+            'bundler resolution). Use `--import-extension=` to pass an ' +
+            'empty value.',
+        );
+      }
+      importExtension = validateImportExtension(next);
+      i++;
       continue;
     }
     const noEmit = matchEmitFlag(arg, '--no-emit-');
@@ -456,7 +502,24 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     verbose,
     graphqlSdl,
     emitOverrides,
+    esm,
+    importExtension,
   };
+}
+
+/**
+ * Validate a raw `--import-extension` value against the closed set of
+ * accepted strings (`.js`, `.ts`, or empty for bundler resolution).
+ * Throws a `TypeError` with a clear hint on any other input.
+ */
+function validateImportExtension(raw: string): ImportExtension {
+  if ((VALID_IMPORT_EXTENSIONS as readonly string[]).includes(raw)) {
+    return raw as ImportExtension;
+  }
+  throw new TypeError(
+    `Unknown --import-extension value '${raw}'; valid: .js, .ts, ` +
+      "'' (empty for bundler resolution).",
+  );
 }
 
 function matchEmitFlag(arg: string, prefix: string): string | undefined {
@@ -469,7 +532,15 @@ function mergeEmitFlags(
   config: LoopbackConfigJson,
   flags: ParsedFlags,
 ): Record<string, boolean> {
-  const base: Record<string, boolean> = {...(config.emit ?? {})};
+  // `config.emit` carries `boolean` emitter toggles alongside the
+  // string-valued `esm` / `importExtension` slots (typed as `EmitValue`).
+  // Strip the string slots before merging so the pipeline's emit-flag
+  // map stays a pure `Record<string, boolean>`.
+  const base: Record<string, boolean> = {};
+  const source: Readonly<Record<string, EmitValue>> = config.emit ?? {};
+  for (const [k, v] of Object.entries(source)) {
+    if (typeof v === 'boolean') base[k] = v;
+  }
   for (const [k, v] of Object.entries(flags.emitOverrides)) {
     base[k] = v;
   }
@@ -498,6 +569,89 @@ function applyPerSchemaOverrides(
     'graphql-overrides'?: {sdl: true};
   } = {...config, 'graphql-overrides': {sdl: true}};
   return cloned;
+}
+
+/**
+ * Build the {@link PipelineRunOptions} bag handed to `Pipeline.run`. Wraps
+ * the per-schema override + emit-flag merge + (new) `moduleFormat` decision
+ * so the one-shot and watch paths stay in lock-step. Also handles the
+ * `--import-extension-without-esm` warning: emitted once per run when the
+ * user passed `--import-extension` but the effective ESM mode is false.
+ *
+ * TODO(cross-wave): drop the cast on `runOpts` once `PipelineRunOptions`
+ * declares the optional `moduleFormat` field (esm + importExtension)
+ * in `engine/pipeline.ts`.
+ */
+function buildRunOptions(
+  opts: {projectRoot: string; config: LoopbackConfigJson},
+  flags: ParsedFlags,
+): PipelineRunOptions {
+  const moduleFormat = computeModuleFormat(flags, opts.config);
+
+  // Warn if `--import-extension` was passed but ESM is not effectively on.
+  // Decision precedence mirrors `computeModuleFormat`. Warning is emitted
+  // unconditionally per `runGen` invocation; watch mode triggers it once
+  // (warnings live on `flags`, which is built once before the watcher
+  // loops). Use stderr so piped stdout consumers still see it.
+  if (flags.importExtension !== undefined) {
+    const esmEffective = flags.esm ?? getEmitEsm(opts.config.emit);
+    if (!esmEffective) {
+      process.stderr.write(
+        '--import-extension has no effect without --esm; ignoring.\n',
+      );
+    }
+  }
+
+  const base: PipelineRunOptions = {
+    projectRoot: opts.projectRoot,
+    config: applyPerSchemaOverrides(opts.config, flags),
+    emitFlags: mergeEmitFlags(opts.config, flags),
+    strict: flags.strict,
+    allowBreaking: flags.allowBreaking,
+    skipTsc: flags.skipTsc,
+  };
+  if (moduleFormat === undefined) return base;
+  // The `moduleFormat` field doesn't exist on `PipelineRunOptions` yet —
+  // the API agent owns that addition (cross-wave). Build the merged
+  // object as an intersection-typed local so this file compiles
+  // standalone and the runtime payload is already in place when the
+  // field lands. The local-typed annotation (rather than an `as` cast)
+  // satisfies @typescript-eslint/consistent-type-assertions.
+  const withModuleFormat: PipelineRunOptions & {
+    readonly moduleFormat: {
+      readonly esm: boolean;
+      readonly importExtension: ImportExtension;
+    };
+  } = {...base, moduleFormat};
+  return withModuleFormat;
+}
+
+/**
+ * Resolve the effective `{esm, importExtension}` pair from CLI flags +
+ * config, applying the documented precedence:
+ *
+ *   1. CLI flag (if present) wins
+ *   2. Config `emit.esm` / `emit.importExtension`
+ *   3. Defaults: `esm = false`, `importExtension = '.js'`
+ *
+ * Returns `undefined` when the resolved value is the default
+ * (`esm: false`, `importExtension: '.js'`) so the pipeline can skip the
+ * field entirely — keeping the on-the-wire options bag minimal.
+ */
+function computeModuleFormat(
+  flags: ParsedFlags,
+  config: LoopbackConfigJson,
+):
+  | {readonly esm: boolean; readonly importExtension: ImportExtension}
+  | undefined {
+  // `getEmitEsm` / `getEmitImportExtension` already collapse "missing or
+  // invalid" to the project-wide defaults (`false`, `'.js'`), so the
+  // precedence reduces to: CLI flag if present, else helper.
+  const esm = flags.esm ?? getEmitEsm(config.emit);
+  const importExtension =
+    flags.importExtension ?? getEmitImportExtension(config.emit);
+  if (!esm && importExtension === '.js') return undefined;
+  return {esm, importExtension};
 }
 
 // ---------------------------------------------------------------------------
