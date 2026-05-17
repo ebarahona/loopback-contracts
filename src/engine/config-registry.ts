@@ -46,8 +46,15 @@ export class InMemoryConfigRegistry implements ConfigRegistry {
     return this.configs.has(contractId);
   }
 
-  /** Reset between pipeline runs. */
-  clear(): void {
+  /**
+   * Reset between pipeline runs. Engine-private: not part of the public
+   * {@link ConfigRegistry} interface — pipeline.ts calls this through the
+   * concrete class binding to enforce the "fully populated or fully empty"
+   * stage-5 invariant.
+   *
+   * @internal
+   */
+  _reset(): void {
     this.configs.clear();
   }
 }

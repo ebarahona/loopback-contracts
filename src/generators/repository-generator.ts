@@ -54,7 +54,7 @@ interface RelationRepoView {
  * {@link EmitterContext.configs} — repositories are an LB4-idiom projection
  * and have nothing to emit for contracts-only schemas.
  *
- * @experimental
+ * @internal
  */
 @injectable({
   scope: BindingScope.SINGLETON,

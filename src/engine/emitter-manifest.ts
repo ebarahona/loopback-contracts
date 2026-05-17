@@ -98,6 +98,19 @@ export interface EmitterManifest {
   readonly optIn?: boolean;
 
   /**
+   * Mirrors {@link ProjectionEmitter.outputScope}. When set to
+   * `'per-project'` the engine invokes the emitter once per pipeline run
+   * (rather than once per schema), which is what manifest-backed emitters
+   * that aggregate every schema into a single output document need —
+   * e.g. a project-level `swagger.json` that lists every contract under
+   * `components.schemas`. Omit or set to `'per-schema'` (default) for the
+   * conventional per-schema fan-out.
+   *
+   * @experimental
+   */
+  readonly outputScope?: 'per-schema' | 'per-project';
+
+  /**
    * Plural outputs. Each entry renders one EJS template to one path per
    * schema. Path templates use `{{name}}` interpolation against a small
    * fixed context — see {@link interpolatePath} for the available
@@ -218,6 +231,18 @@ export function validateManifest(raw: unknown): EmitterManifest {
     );
   }
 
+  if (
+    obj['outputScope'] !== undefined &&
+    obj['outputScope'] !== 'per-schema' &&
+    obj['outputScope'] !== 'per-project'
+  ) {
+    throw shapeError(
+      "manifest 'outputScope' must be 'per-schema' | 'per-project' when " +
+        `present, got ${JSON.stringify(obj['outputScope'])}`,
+      '/outputScope',
+    );
+  }
+
   if (obj['outputDir'] !== undefined && typeof obj['outputDir'] !== 'string') {
     throw shapeError(
       "manifest 'outputDir' must be a string when present",
@@ -297,6 +322,11 @@ export function validateManifest(raw: unknown): EmitterManifest {
   }
   if (obj['optIn'] !== undefined) {
     Object.assign(manifest, {optIn: obj['optIn'] as boolean});
+  }
+  if (obj['outputScope'] !== undefined) {
+    Object.assign(manifest, {
+      outputScope: obj['outputScope'] as 'per-schema' | 'per-project',
+    });
   }
   // Preserve the legacy fields on the returned object too, for diagnostics
   // and serialisation round-trips. Only fields the author actually wrote

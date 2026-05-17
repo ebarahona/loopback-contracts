@@ -19,6 +19,7 @@ interface PluralManifestFixture {
   kind: string;
   tier: 'lb4-idiom' | 'real-translation' | 'convenience';
   description: string;
+  outputScope?: 'per-schema' | 'per-project';
   outputs: ReadonlyArray<{
     template: string;
     path: string;
@@ -205,5 +206,38 @@ describe('ManifestEmitterBooter plural outputs[]', () => {
     );
     await booter.stop();
     expect(listManifestBindings(app)).toHaveLength(0);
+  });
+
+  it("round-trips manifest 'outputScope' onto the bound emitter", async () => {
+    // Fresh root so this fixture is isolated from the beforeEach plural
+    // fixture (which omits outputScope on purpose to cover the default).
+    const scopedRoot = join(
+      tmpdir(),
+      `lb-contracts-booter-scoped-${randomBytes(6).toString('hex')}`,
+    );
+    mkdirSync(join(scopedRoot, 'emitters', 'templates'), {recursive: true});
+    writePluralFixture(scopedRoot, {
+      kind: 'project-scoped-fixture',
+      tier: 'convenience',
+      description: 'project-scoped fixture',
+      outputScope: 'per-project',
+      outputs: [
+        {
+          template: join(scopedRoot, 'emitters', 'templates', 'agg.ejs'),
+          path: 'swagger.json',
+        },
+      ],
+    });
+    try {
+      const {app, booter} = makeBooter(scopedRoot);
+      await booter.start();
+      const emitter = await app.get<{outputScope?: string}>(
+        'platform.contracts.emitters.manifest.project-scoped-fixture',
+      );
+      expect(emitter.outputScope).toBe('per-project');
+      await booter.stop();
+    } finally {
+      rmSync(scopedRoot, {recursive: true, force: true});
+    }
   });
 });

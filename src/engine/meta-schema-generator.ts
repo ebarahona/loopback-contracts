@@ -288,6 +288,12 @@ export function buildEmitterManifestMetaSchema(): JSONSchema {
       peerDeps: {type: 'array', items: {type: 'string'}},
       perSchemaOptionsSchema: {type: 'object'},
       optIn: {type: 'boolean'},
+      // Mirrors ProjectionEmitter.outputScope. When set to 'per-project'
+      // the engine invokes the emitter once per pipeline run instead of
+      // once per schema — needed for manifest emitters that aggregate
+      // every contract into a single output file (e.g. project-level
+      // `swagger.json`). Absent or 'per-schema' = conventional fan-out.
+      outputScope: {type: 'string', enum: ['per-schema', 'per-project']},
       // Plural form — preferred.
       outputs: {
         type: 'array',

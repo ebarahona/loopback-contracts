@@ -250,7 +250,7 @@ export class Pipeline {
     let stagesRun = 0;
     this.registry.clear();
     this.lossy.clear();
-    this.configs.clear();
+    this.configs._reset();
     this.writeQueue = [];
     this.schemaOrigins.clear();
     const maxStage: StageNumber = opts.maxStage ?? 8;
@@ -616,42 +616,49 @@ export class Pipeline {
 
     // Validate every configs/*.config.json on disk.
     const configFiles = await listConfigFiles(this.paths.configsDir);
-    for (const file of configFiles) {
-      const raw = await readFile(file, 'utf8');
-      let json: unknown;
-      try {
-        json = JSON.parse(raw);
-      } catch (cause) {
-        throw new ContractsValidationError(
-          `stage 5: invalid JSON in ${file}: ${(cause as Error).message}`,
-          {sourcePath: file, instancePath: ''},
-          {cause},
-        );
-      }
-      const ok = validate(json);
-      if (!ok) {
-        const candidate = isPlainObject(json)
-          ? (json as unknown as ModelConfigJson)
-          : undefined;
-        const contractId =
-          candidate && typeof candidate.$contractId === 'string'
-            ? candidate.$contractId
+    // stage-5 must leave the registry either fully populated or fully empty — no partial state.
+    try {
+      for (const file of configFiles) {
+        const raw = await readFile(file, 'utf8');
+        let json: unknown;
+        try {
+          json = JSON.parse(raw);
+        } catch (cause) {
+          throw new ContractsValidationError(
+            `stage 5: invalid JSON in ${file}: ${(cause as Error).message}`,
+            {sourcePath: file, instancePath: ''},
+            {cause},
+          );
+        }
+        const ok = validate(json);
+        if (!ok) {
+          const candidate = isPlainObject(json)
+            ? (json as unknown as ModelConfigJson)
             : undefined;
-        throw new ContractsValidationError(
-          `stage 5: config ${file} failed meta-schema validation:\n${formatAjvErrors(validate.errors)}`,
-          {
-            sourcePath: file,
-            instancePath: validate.errors?.[0]?.instancePath ?? '',
-            ...(contractId !== undefined ? {schemaId: contractId} : {}),
-          },
-        );
+          const contractId =
+            candidate && typeof candidate.$contractId === 'string'
+              ? candidate.$contractId
+              : undefined;
+          throw new ContractsValidationError(
+            `stage 5: config ${file} failed meta-schema validation:\n${formatAjvErrors(validate.errors)}`,
+            {
+              sourcePath: file,
+              instancePath: validate.errors?.[0]?.instancePath ?? '',
+              ...(contractId !== undefined ? {schemaId: contractId} : {}),
+            },
+          );
+        }
+        // Validation passed — load into the per-contract config registry so
+        // lb4-idiom-tier emitters (model/repository/controller/datasource)
+        // can look up their LB4 metadata by `$contractId` at emit time.
+        if (isPlainObject(json)) {
+          // Ajv validated against buildModelConfigMetaSchema(); the shape is `ModelConfigJson` by construction.
+          this.configs.add(json as unknown as ModelConfigJson);
+        }
       }
-      // Validation passed — load into the per-contract config registry so
-      // lb4-idiom-tier emitters (model/repository/controller/datasource)
-      // can look up their LB4 metadata by `$contractId` at emit time.
-      if (isPlainObject(json)) {
-        this.configs.add(json as unknown as ModelConfigJson);
-      }
+    } catch (err) {
+      this.configs._reset();
+      throw err;
     }
 
     // Validate inline `config-bindings` entries in `loopback.config.json`.

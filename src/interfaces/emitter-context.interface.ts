@@ -100,6 +100,8 @@ export interface EmitterContext<TPerSchemaOptions = unknown> {
    * (model, repository, controller, datasource), which use it to project
    * the LB4-specific output (`@model()` settings, `@hasMany()` decorators,
    * datasource bindings, etc.).
+   *
+   * @experimental
    */
   readonly configs?: ConfigRegistry;
 }
@@ -115,7 +117,7 @@ export interface EmitterContext<TPerSchemaOptions = unknown> {
  * Marked optional on {@link EmitterContext.configs} so emitters that don't
  * touch LB4 config (most sidecar emitters) don't need to care it exists.
  *
- * @public
+ * @experimental
  */
 export interface ConfigRegistry {
   /**

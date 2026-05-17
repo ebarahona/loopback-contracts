@@ -105,6 +105,8 @@ export interface ProjectionEmitter<TPerSchemaOptions = unknown> {
    * `ctx.schema` slot still references a real schema (the first in
    * topological order) so `EmitterContext` shape stays uniform across
    * both scopes.
+   *
+   * @experimental
    */
   readonly outputScope?: 'per-schema' | 'per-project';
 

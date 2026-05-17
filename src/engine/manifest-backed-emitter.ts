@@ -109,6 +109,14 @@ export class ManifestBackedEmitter implements ProjectionEmitter {
   readonly peerDeps?: string[];
   readonly perSchemaOptionsSchema?: JSONSchema;
   readonly templatePaths: readonly string[];
+  /**
+   * Mirrors {@link ProjectionEmitter.outputScope} on the manifest. Forwarded
+   * verbatim from the manifest so the engine's runner honours per-project
+   * fan-in for manifest-backed emitters the same way it does for TS-class
+   * emitters. Left `undefined` when the manifest omits it — the runner
+   * treats absent as `'per-schema'`.
+   */
+  readonly outputScope?: 'per-schema' | 'per-project';
 
   /** Resolved, plural-shape outputs the `emit()` loop iterates. */
   private readonly resolvedOutputs: readonly ResolvedOutput[];
@@ -135,6 +143,14 @@ export class ManifestBackedEmitter implements ProjectionEmitter {
     this.tier = manifest.tier;
     this.description = manifest.description;
     this.optIn = manifest.optIn === true;
+    // Forward `outputScope` only when the manifest set it — the
+    // `exactOptionalPropertyTypes` compiler flag rejects writing
+    // `undefined` to an optional slot, and the runner treats absent and
+    // `'per-schema'` as equivalent so leaving the field unset is the right
+    // default-per-schema behaviour.
+    if (manifest.outputScope !== undefined) {
+      this.outputScope = manifest.outputScope;
+    }
     if (manifest.peerDeps !== undefined) {
       // ProjectionEmitter declares `peerDeps` as a mutable `string[]`; copy
       // out of the readonly manifest array to satisfy the interface without
