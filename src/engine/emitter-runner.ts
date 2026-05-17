@@ -52,11 +52,16 @@ const TIER_ORDER: Readonly<Record<ProjectionEmitter['tier'], number>> = {
  * `ctx.schema`, so a frozen empty stand-in keeps the `EmitterContext`
  * shape uniform without leaking a misleading `$id` into emitter logic.
  *
+ * The `$id` uses URN syntax (`urn:loopback-contracts:internal:...`) to
+ * signal an engine-synthetic placeholder no real user schema could
+ * plausibly author. If an emitter logs `ctx.schema.$id`, the URN format
+ * makes the synthetic origin obvious.
+ *
  * Frozen at module scope so a misbehaving emitter cannot mutate it and
  * corrupt later runs sharing the same module instance.
  */
 const EMPTY_PROJECT_SCHEMA: Readonly<JSONSchema> = Object.freeze({
-  $id: '__project__',
+  $id: 'urn:loopback-contracts:internal:empty-project-schema',
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
 });

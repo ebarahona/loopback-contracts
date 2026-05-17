@@ -388,7 +388,15 @@ const KNOWN_LITERAL_FLAGS: ReadonlySet<string> = new Set([
   '--import-extension',
 ]);
 
-interface ParsedFlags {
+/**
+ * Parsed `lb4 gen` flag set, surfaced through every helper that needs to
+ * inspect a CLI invocation. Exported only so `mergeEmitFlags` (also
+ * `@internal`) can be unit-tested without going through the dispatcher;
+ * not part of the package's public API.
+ *
+ * @internal
+ */
+export interface ParsedFlags {
   readonly watch: boolean;
   readonly strict: boolean;
   readonly allowBreaking: boolean;
@@ -559,19 +567,29 @@ function matchEmitFlag(arg: string, prefix: string): string | undefined {
   return (EMITTER_KINDS as readonly string[]).includes(kind) ? kind : undefined;
 }
 
-function mergeEmitFlags(
+/**
+ * Merge the three sources that decide which emitters fire for a run.
+ *
+ * Precedence (lowest to highest):
+ *   1. Seed: LB4-idiom kinds default to true (every `lb4 gen` regenerates
+ *      base files for model/repository/controller/datasource unless
+ *      explicitly turned off). Sidecar kinds default to false (opt-in).
+ *   2. `config.emit` carries `boolean` emitter toggles alongside the
+ *      string-valued `esm` / `importExtension` slots (typed as
+ *      `EmitValue`); the string slots are stripped here so the pipeline's
+ *      emit-flag map stays a pure `Record<string, boolean>`.
+ *   3. CLI overrides from `--emit-<kind>` / `--no-emit-<kind>` win last.
+ *
+ * Exported to give the precedence-matrix unit spec a direct seam (see
+ * `src/__tests__/unit/cli-gen-merge-emit-flags.spec.ts`). Not part of the
+ * package's public API; consumers must not import from `cli/commands/gen`.
+ *
+ * @internal
+ */
+export function mergeEmitFlags(
   config: LoopbackConfigJson,
   flags: ParsedFlags,
 ): Record<string, boolean> {
-  // Precedence (lowest to highest):
-  //   1. Seed: LB4-idiom kinds default to true (every `lb4 gen` regenerates
-  //      base files for model/repository/controller/datasource unless
-  //      explicitly turned off). Sidecar kinds default to false (opt-in).
-  //   2. `config.emit` carries `boolean` emitter toggles alongside the
-  //      string-valued `esm` / `importExtension` slots (typed as
-  //      `EmitValue`); the string slots are stripped here so the pipeline's
-  //      emit-flag map stays a pure `Record<string, boolean>`.
-  //   3. CLI overrides from `--emit-<kind>` / `--no-emit-<kind>` win last.
   const base: Record<string, boolean> = {};
   for (const k of LB4_IDIOM_EMITTER_KINDS) base[k] = true;
   const source: Readonly<Record<string, EmitValue>> = config.emit ?? {};

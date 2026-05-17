@@ -1,4 +1,5 @@
 import {BindingScope, injectable} from '@loopback/core';
+import type {ValidateFunction} from 'ajv';
 import Ajv2020 from 'ajv/dist/2020';
 import {resolve} from 'node:path';
 import {ContractsValidationError, toKebab, toPascal} from '../../helpers';
@@ -67,13 +68,27 @@ export class AsyncAPIEmitter implements ProjectionEmitter<AsyncAPIPerSchemaOptio
     additionalProperties: false,
   };
 
+  // Cached: Ajv compilation is the documented hot-path cost
+  // (https://ajv.js.org/guide/managing-schemas.html). The emitter is a
+  // SINGLETON binding, so this cache lives for the process lifetime —
+  // safe because the per-schema options schema is immutable.
+  private cachedOptionsValidator: ValidateFunction | undefined;
+  private cachedAjv: Ajv2020 | undefined;
+
+  private getOptionsValidator(): ValidateFunction {
+    if (this.cachedOptionsValidator !== undefined) {
+      return this.cachedOptionsValidator;
+    }
+    this.cachedAjv = new Ajv2020({strict: false});
+    this.cachedOptionsValidator = this.cachedAjv.compile(
+      this.perSchemaOptionsSchema,
+    );
+    return this.cachedOptionsValidator;
+  }
+
   emit(ctx: EmitterContext<AsyncAPIPerSchemaOptions>): EmittedFile[] {
     const {schema, templates} = ctx;
-    const options = validateOptions<AsyncAPIPerSchemaOptions>(
-      this.kind,
-      this.perSchemaOptionsSchema,
-      ctx.options,
-    );
+    const options = this.validateOptions(ctx.options);
     const id = typeof schema.$id === 'string' ? schema.$id : 'anonymous';
     const baseName = id.replace(/\.v\d+$/, '');
     const Name = toPascal(baseName);
@@ -103,6 +118,34 @@ export class AsyncAPIEmitter implements ProjectionEmitter<AsyncAPIPerSchemaOptio
         producer: 'asyncapi-emitter',
       },
     ];
+  }
+
+  /**
+   * Validate `options` against the emitter's declared
+   * `perSchemaOptionsSchema` with Ajv 2020 via the cached compiled
+   * validator before they reach the renderer. Empty / absent options pass
+   * through; structural violations raise a typed
+   * {@link ContractsValidationError}.
+   */
+  private validateOptions(options: unknown): AsyncAPIPerSchemaOptions {
+    const validate = this.getOptionsValidator();
+    const candidate = options ?? {};
+    if (!validate(candidate)) {
+      // `cachedAjv` is set in lock-step with `cachedOptionsValidator` by
+      // `getOptionsValidator`; the non-null assertion is sound on the
+      // failure branch.
+      const ajv = this.cachedAjv as Ajv2020;
+      throw new ContractsValidationError(
+        `Invalid options for ${this.kind} emitter: ${ajv.errorsText(
+          validate.errors,
+        )}`,
+        {
+          sourcePath: `<schema x-${this.kind}>`,
+          instancePath: validate.errors?.[0]?.instancePath ?? '',
+        },
+      );
+    }
+    return candidate as AsyncAPIPerSchemaOptions;
   }
 }
 
@@ -282,31 +325,4 @@ function yamlString(s: string): string {
   if (/[:#&*!|>'"%@`{}[\],\n]/.test(s)) return JSON.stringify(s);
   if (/^\s|\s$/.test(s)) return JSON.stringify(s);
   return s;
-}
-
-/**
- * Validate `ctx.options` against the emitter's declared
- * `perSchemaOptionsSchema` with Ajv 2020 before they reach the renderer.
- * Empty / absent options pass through; structural violations raise a typed
- * {@link ContractsValidationError}.
- */
-function validateOptions<T>(
-  kind: string,
-  schema: JSONSchema | undefined,
-  options: unknown,
-): T {
-  if (schema === undefined) return (options ?? {}) as T;
-  const ajv = new Ajv2020({strict: false});
-  const validate = ajv.compile(schema);
-  const candidate = options ?? {};
-  if (!validate(candidate)) {
-    throw new ContractsValidationError(
-      `Invalid options for ${kind} emitter: ${ajv.errorsText(validate.errors)}`,
-      {
-        sourcePath: `<schema x-${kind}>`,
-        instancePath: validate.errors?.[0]?.instancePath ?? '',
-      },
-    );
-  }
-  return candidate as T;
 }

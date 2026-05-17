@@ -1,4 +1,5 @@
 import {BindingScope, injectable} from '@loopback/core';
+import type {ValidateFunction} from 'ajv';
 import Ajv2020 from 'ajv/dist/2020';
 import {resolve} from 'node:path';
 import {ContractsValidationError, toKebab, toPascal} from '../../helpers';
@@ -250,13 +251,27 @@ export class GraphQLEmitter implements ProjectionEmitter<GraphQLPerSchemaOptions
     additionalProperties: false,
   };
 
+  // Cached: Ajv compilation is the documented hot-path cost
+  // (https://ajv.js.org/guide/managing-schemas.html). The emitter is a
+  // SINGLETON binding, so this cache lives for the process lifetime —
+  // safe because the per-schema options schema is immutable.
+  private cachedOptionsValidator: ValidateFunction | undefined;
+  private cachedAjv: Ajv2020 | undefined;
+
+  private getOptionsValidator(): ValidateFunction {
+    if (this.cachedOptionsValidator !== undefined) {
+      return this.cachedOptionsValidator;
+    }
+    this.cachedAjv = new Ajv2020({strict: false});
+    this.cachedOptionsValidator = this.cachedAjv.compile(
+      this.perSchemaOptionsSchema,
+    );
+    return this.cachedOptionsValidator;
+  }
+
   emit(ctx: EmitterContext<GraphQLPerSchemaOptions>): EmittedFile[] {
     const {schema, templates} = ctx;
-    const options = validateOptions<GraphQLPerSchemaOptions>(
-      this.kind,
-      this.perSchemaOptionsSchema,
-      ctx.options,
-    );
+    const options = this.validateOptions(ctx.options);
     const baseName = deriveName(schema);
     const Name = toPascal(baseName);
     const kebab = toKebab(baseName);
@@ -296,6 +311,34 @@ export class GraphQLEmitter implements ProjectionEmitter<GraphQLPerSchemaOptions
     }
 
     return files;
+  }
+
+  /**
+   * Validate `options` against the emitter's declared
+   * `perSchemaOptionsSchema` with Ajv 2020 via the cached compiled
+   * validator before they reach the renderer. Empty / absent options pass
+   * through; structural violations raise a typed
+   * {@link ContractsValidationError}.
+   */
+  private validateOptions(options: unknown): GraphQLPerSchemaOptions {
+    const validate = this.getOptionsValidator();
+    const candidate = options ?? {};
+    if (!validate(candidate)) {
+      // `cachedAjv` is set in lock-step with `cachedOptionsValidator` by
+      // `getOptionsValidator`; the non-null assertion is sound on the
+      // failure branch.
+      const ajv = this.cachedAjv as Ajv2020;
+      throw new ContractsValidationError(
+        `Invalid options for ${this.kind} emitter: ${ajv.errorsText(
+          validate.errors,
+        )}`,
+        {
+          sourcePath: `<schema x-${this.kind}>`,
+          instancePath: validate.errors?.[0]?.instancePath ?? '',
+        },
+      );
+    }
+    return candidate as GraphQLPerSchemaOptions;
   }
 }
 
@@ -393,31 +436,4 @@ function renderSdl(
   const customScalars = [...declared].map(s => `scalar ${s}`).join('\n');
   const prelude = customScalars ? customScalars + '\n\n' : '';
   return `${prelude}${header}type ${Name} {\n${body}\n}\n`;
-}
-
-/**
- * Validate `ctx.options` against the emitter's declared
- * `perSchemaOptionsSchema` with Ajv 2020 before they reach the renderer.
- * Empty / absent options pass through; structural violations raise a typed
- * {@link ContractsValidationError}.
- */
-function validateOptions<T>(
-  kind: string,
-  schema: JSONSchema | undefined,
-  options: unknown,
-): T {
-  if (schema === undefined) return (options ?? {}) as T;
-  const ajv = new Ajv2020({strict: false});
-  const validate = ajv.compile(schema);
-  const candidate = options ?? {};
-  if (!validate(candidate)) {
-    throw new ContractsValidationError(
-      `Invalid options for ${kind} emitter: ${ajv.errorsText(validate.errors)}`,
-      {
-        sourcePath: `<schema x-${kind}>`,
-        instancePath: validate.errors?.[0]?.instancePath ?? '',
-      },
-    );
-  }
-  return candidate as T;
 }

@@ -1,4 +1,5 @@
 import {BindingScope, injectable} from '@loopback/core';
+import type {ValidateFunction} from 'ajv';
 import Ajv2020 from 'ajv/dist/2020';
 import {
   ContractsCodegenError,
@@ -78,14 +79,28 @@ export class ProtoEmitter implements ProjectionEmitter<ProtoPerSchemaOptions> {
     additionalProperties: false,
   };
 
+  // Cached: Ajv compilation is the documented hot-path cost
+  // (https://ajv.js.org/guide/managing-schemas.html). The emitter is a
+  // SINGLETON binding, so this cache lives for the process lifetime —
+  // safe because the per-schema options schema is immutable.
+  private cachedOptionsValidator: ValidateFunction | undefined;
+  private cachedAjv: Ajv2020 | undefined;
+
+  private getOptionsValidator(): ValidateFunction {
+    if (this.cachedOptionsValidator !== undefined) {
+      return this.cachedOptionsValidator;
+    }
+    this.cachedAjv = new Ajv2020({strict: false});
+    this.cachedOptionsValidator = this.cachedAjv.compile(
+      this.perSchemaOptionsSchema,
+    );
+    return this.cachedOptionsValidator;
+  }
+
   async emit(
     ctx: EmitterContext<ProtoPerSchemaOptions>,
   ): Promise<EmittedFile[]> {
-    const options = validateOptions<ProtoPerSchemaOptions>(
-      this.kind,
-      this.perSchemaOptionsSchema,
-      ctx.options,
-    );
+    const options = this.validateOptions(ctx.options);
 
     const quicktype = loadQuicktypeCore();
     const schemaId = typeof ctx.schema.$id === 'string' ? ctx.schema.$id : '';
@@ -127,6 +142,34 @@ export class ProtoEmitter implements ProjectionEmitter<ProtoPerSchemaOptions> {
       },
     ];
   }
+
+  /**
+   * Validate `options` against the emitter's declared
+   * `perSchemaOptionsSchema` with Ajv 2020 via the cached compiled
+   * validator. Empty / missing options pass through; structural violations
+   * raise a typed {@link ContractsValidationError} so the CLI can render a
+   * precise pointer.
+   */
+  private validateOptions(options: unknown): ProtoPerSchemaOptions {
+    const validate = this.getOptionsValidator();
+    const candidate = options ?? {};
+    if (!validate(candidate)) {
+      // `cachedAjv` is set in lock-step with `cachedOptionsValidator` by
+      // `getOptionsValidator`; the non-null assertion is sound on the
+      // failure branch.
+      const ajv = this.cachedAjv as Ajv2020;
+      throw new ContractsValidationError(
+        `Invalid options for ${this.kind} emitter: ${ajv.errorsText(
+          validate.errors,
+        )}`,
+        {
+          sourcePath: `<schema x-${this.kind}>`,
+          instancePath: validate.errors?.[0]?.instancePath ?? '',
+        },
+      );
+    }
+    return candidate as ProtoPerSchemaOptions;
+  }
 }
 
 /**
@@ -157,33 +200,6 @@ function isSoftQuicktypeFailure(message: string): boolean {
   return SOFT_QUICKTYPE_ERROR_FRAGMENTS.some(fragment =>
     lower.includes(fragment),
   );
-}
-
-/**
- * Validate `ctx.options` against the emitter's declared
- * `perSchemaOptionsSchema` with Ajv 2020. Empty / missing options pass
- * through; structural violations raise a typed
- * {@link ContractsValidationError} so the CLI can render a precise pointer.
- */
-function validateOptions<T>(
-  kind: string,
-  schema: JSONSchema | undefined,
-  options: unknown,
-): T {
-  if (schema === undefined) return (options ?? {}) as T;
-  const ajv = new Ajv2020({strict: false});
-  const validate = ajv.compile(schema);
-  const candidate = options ?? {};
-  if (!validate(candidate)) {
-    throw new ContractsValidationError(
-      `Invalid options for ${kind} emitter: ${ajv.errorsText(validate.errors)}`,
-      {
-        sourcePath: `<schema x-${kind}>`,
-        instancePath: validate.errors?.[0]?.instancePath ?? '',
-      },
-    );
-  }
-  return candidate as T;
 }
 
 // ---------- quicktype-core driver ---------------------------------------

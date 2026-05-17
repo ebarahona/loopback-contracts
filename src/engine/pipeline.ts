@@ -237,6 +237,26 @@ export class Pipeline {
   }
 
   /**
+   * Recompile a meta-schema against the cached Ajv instance, evicting any
+   * prior copy first. Required because Ajv's compiler cache rejects a
+   * second `compile(metaSchema)` with the same `$id` — the watch-mode
+   * pipeline calls `run()` repeatedly and would trip this on the second
+   * iteration without the explicit `removeSchema`.
+   *
+   * This is the canonical way to (re)compile a meta-schema in this
+   * engine. Adding a second inline `compile(buildXxxMeta())` call
+   * elsewhere in stage 5 without going through this helper would
+   * reintroduce the "schema with key … already exists" runtime error on
+   * the second `run()` invocation in the same process.
+   */
+  private compileFresh(metaSchema: JSONSchema): ValidateFunction {
+    const ajv = this.getAjv();
+    const id = (metaSchema as {$id?: string}).$id;
+    if (typeof id === 'string') ajv.removeSchema(id);
+    return ajv.compile(metaSchema as object);
+  }
+
+  /**
    * Execute the full pipeline. Returns the per-run summary; throws a typed
    * error on any stage failure. No partial writes — stage 7d only fires
    * once stages 1-6 all pass.
@@ -592,27 +612,21 @@ export class Pipeline {
       this.queueMetaSchema('emitter.schema.json', emitterManifestMeta);
     }
 
-    // Remove any prior compiled copy of the model-config meta-schema
-    // before re-compiling — the meta-schema rebuilds from the current
+    // Recompile the model-config meta-schema via the engine's canonical
+    // compile-fresh helper — the meta-schema rebuilds from the current
     // schema + datasource set every run, so its shape (and thus its
-    // hash) can change while keeping the same stable `$id`. Without
-    // this Ajv would throw 'schema with key … already exists'.
+    // hash) can change while keeping the same stable `$id`. Without the
+    // `removeSchema` baked into `compileFresh`, Ajv would throw
+    // 'schema with key … already exists' on the second `run()` call in
+    // the same process (watch mode).
     //
     // INVARIANT: `buildModelConfigMetaSchema` must always set a stable,
-    // non-empty `$id` on the returned schema. The guard below issues an
-    // unconditional `removeSchema(metaId)` (Ajv's `removeSchema` is
-    // idempotent on a missing key, so the call is safe whether or not a
-    // prior instance is cached) and so depends on `metaId` being a
-    // stable string — if a future change to `buildModelConfigMetaSchema`
-    // drops or randomises the `$id`, Ajv will throw the "schema with key
-    // already exists" diagnostic on the next run because the cached copy
-    // can no longer be located for removal. Keep the `$id` stable.
-    const ajv = this.getAjv();
-    const metaId = (modelConfigMeta as {$id?: string}).$id;
-    if (typeof metaId === 'string') {
-      ajv.removeSchema(metaId);
-    }
-    const validate = ajv.compile(modelConfigMeta as object);
+    // non-empty `$id` on the returned schema — `compileFresh` evicts by
+    // `$id`, so a future change that drops or randomises the `$id`
+    // would reintroduce the "schema with key already exists" diagnostic
+    // because the cached copy could no longer be located for removal.
+    // Keep the `$id` stable.
+    const validate = this.compileFresh(modelConfigMeta as JSONSchema);
 
     // Validate every configs/*.config.json on disk.
     const configFiles = await listConfigFiles(this.paths.configsDir);
@@ -663,16 +677,32 @@ export class Pipeline {
       // Validate inline `config-bindings` entries in `loopback.config.json`.
       const inline = opts.config['config-bindings'];
       if (Array.isArray(inline)) {
+        const inlineConfigPath = join(opts.projectRoot, 'loopback.config.json');
         for (const [i, entry] of inline.entries()) {
           const ok = validate(entry);
           if (!ok) {
+            const candidate = isPlainObject(entry)
+              ? (entry as unknown as ModelConfigJson)
+              : undefined;
+            const contractId =
+              candidate && typeof candidate.$contractId === 'string'
+                ? candidate.$contractId
+                : '<unknown>';
             throw new ContractsValidationError(
               `stage 5: loopback.config.json.config-bindings[${i}] failed meta-schema validation:\n${formatAjvErrors(validate.errors)}`,
               {
-                sourcePath: 'loopback.config.json',
+                sourcePath: inlineConfigPath,
                 instancePath: `/config-bindings/${i}${validate.errors?.[0]?.instancePath ?? ''}`,
+                schemaId: contractId,
               },
             );
+          }
+          // Validation passed — load into the per-contract config registry so
+          // lb4-idiom-tier emitters (model/repository/controller/datasource)
+          // can look up their LB4 metadata by `$contractId` at emit time.
+          if (isPlainObject(entry)) {
+            // Ajv validated against buildModelConfigMetaSchema(); the shape is `ModelConfigJson` by construction.
+            this.configs.add(entry as unknown as ModelConfigJson);
           }
         }
       }
