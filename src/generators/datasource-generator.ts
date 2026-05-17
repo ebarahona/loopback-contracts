@@ -59,14 +59,14 @@ type DatasourcesFile =
  *
  * Unlike the model / repository / controller emitters, datasource output is
  * project-level, not per-schema — `datasources.json` is keyed by datasource
- * name and carries no `$id`/`$contractId` linkage. The runner still calls
- * {@link emit} once per `(schema, emitter)` pair, so this emitter re-reads
- * `datasources.json` on every invocation and re-emits the same descriptor
- * set. FileWriter's content-hash idempotency dedupes the writes, so the net
- * effect is the same files written once per `lb4 gen` run; the cost is some
- * redundant in-memory work that stays measurable only past hundreds of
- * schemas, at which point we revisit (e.g. via a per-run cache or a
- * dedicated project-level emitter category).
+ * name and carries no `$id`/`$contractId` linkage. Declares
+ * {@link ProjectionEmitter.outputScope} as `'per-project'` so the engine
+ * invokes {@link emit} exactly once per pipeline run rather than fanning
+ * out per schema; the single invocation reads `datasources.json` once and
+ * returns one descriptor per entry. (Without the per-project scope, a
+ * project with N schemas would produce N copies of every datasource
+ * descriptor and trip FileWriter's same-path collision check at codegen
+ * time.)
  *
  * Environment-variable interpolation: any string value of the form
  * `"${VAR}"` is rewritten into a `process.env.VAR` reference in the emitted
@@ -86,6 +86,7 @@ type DatasourcesFile =
 export class DatasourceGenerator implements ProjectionEmitter {
   readonly kind = 'datasource';
   readonly tier = 'lb4-idiom' as const;
+  readonly outputScope = 'per-project' as const;
   readonly outputSuffix = '.base.datasource.ts';
   readonly description =
     'LB4 juggler datasource — regen-always base + skipIfExists extension stub (one per entry in datasources.json)';
@@ -93,14 +94,12 @@ export class DatasourceGenerator implements ProjectionEmitter {
   readonly templatePaths: readonly string[] = [TPL_BASE, TPL_EXT];
 
   /**
-   * Engine entry point. Datasources are project-level, not per-schema: we
-   * load `<projectRoot>/datasources.json` synchronously on every `emit()`
-   * call and iterate every entry, returning the full descriptor set.
-   *
-   * FileWriter dedupes by content hash, so the redundant work the runner's
-   * per-schema dispatch produces (5 schemas → this emit runs 5 times) is
-   * O(redundant in-memory render) and zero filesystem writes after the
-   * first pass — correctness is guaranteed.
+   * Engine entry point. Datasources are project-level, not per-schema:
+   * the EmitterRunner honours `outputScope: 'per-project'` and invokes
+   * `emit()` exactly once per pipeline run with the first schema in
+   * topological order as `ctx.schema`. This method reads
+   * `<projectRoot>/datasources.json` once, iterates every entry, and
+   * returns the full descriptor set in a single pass.
    *
    * Missing `datasources.json` is not an error: a contracts-only project
    * legitimately ships no datasources. We swallow the read failure and

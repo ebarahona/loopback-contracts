@@ -85,6 +85,30 @@ export interface ProjectionEmitter<TPerSchemaOptions = unknown> {
   readonly peerDeps?: string[];
 
   /**
+   * How often the engine invokes {@link emit} per pipeline run.
+   *
+   *   - `'per-schema'` (default) — `emit()` runs once per `(emitter, schema)`
+   *     pair, mirroring the per-schema projection model that sidecar
+   *     emitters and `model`/`repository`/`controller` use.
+   *   - `'per-project'` — `emit()` runs **once per pipeline run**, called
+   *     with the first schema in topological order as context. Pick this
+   *     when the emitter's output is a project-level resource (no
+   *     `$contractId` linkage to any one schema) — e.g. the
+   *     `datasource` emitter, which iterates `<projectRoot>/datasources
+   *     .json` regardless of which schemas are loaded.
+   *
+   * Omitting the field is equivalent to declaring `'per-schema'`; the
+   * engine treats `undefined` and `'per-schema'` identically.
+   *
+   * Per-project emitters that depend on the schema registry (rather than
+   * a single `ctx.schema`) should read from `ctx.registry.list()` — the
+   * `ctx.schema` slot still references a real schema (the first in
+   * topological order) so `EmitterContext` shape stays uniform across
+   * both scopes.
+   */
+  readonly outputScope?: 'per-schema' | 'per-project';
+
+  /**
    * Absolute paths of every EJS template `emit()` may render. Declared up
    * front so the engine preloads them once per pipeline run and the
    * synchronous `render()` hot path touches no filesystem.

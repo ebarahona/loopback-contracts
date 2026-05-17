@@ -237,3 +237,102 @@ describe('EmitterRunner.run() emits schemas in topological order', () => {
     expect(recorder.seen).toEqual(['C', 'B', 'A']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// outputScope: 'per-project' — the runner must call emit() exactly once per
+// pipeline run rather than per-schema. Datasource generation drives this
+// case in production; the test uses an isolated recorder so it doesn't
+// depend on the generator's filesystem reads.
+// ---------------------------------------------------------------------------
+
+@injectable({
+  scope: BindingScope.SINGLETON,
+  tags: {[EMITTER_TAG]: EMITTER_TAG, kind: 'topo-project-recorder'},
+})
+class ProjectScopeRecorder implements ProjectionEmitter {
+  readonly kind = 'topo-project-recorder';
+  readonly outputSuffix = '.topo.project.txt';
+  readonly tier = 'convenience' as const;
+  readonly description = 'records emit() call count for outputScope tests';
+  readonly outputScope = 'per-project' as const;
+
+  readonly seen: string[] = [];
+
+  emit(ctx: EmitterContext): EmittedFile[] {
+    const id = typeof ctx.schema.$id === 'string' ? ctx.schema.$id : '<no-id>';
+    this.seen.push(id);
+    return [];
+  }
+}
+
+async function buildProjectRecorderApp(): Promise<{
+  runner: EmitterRunner;
+  recorder: ProjectScopeRecorder;
+}> {
+  const app = new Application();
+  app.component(ContractsComponent);
+  app
+    .bind(ContractsEngineBindings.EMITTER_REGISTRY)
+    .toClass(EmitterRegistry)
+    .inScope(BindingScope.SINGLETON);
+  app
+    .bind(ContractsEngineBindings.EMITTER_RUNNER)
+    .toClass(EmitterRunner)
+    .inScope(BindingScope.SINGLETON);
+  app.bind(ContractsBindings.SCHEMA_REGISTRY).to({
+    get: () => undefined,
+    list: () => [],
+    has: () => false,
+  });
+  app.bind(ContractsBindings.IMPORT_MAP).to({resolve: () => ''});
+  app.bind(ContractsBindings.TEMPLATE_ENGINE).to({
+    preload: async () => {},
+    render: () => '',
+  });
+  app.bind(ContractsBindings.PROJECT_PATHS).to({
+    root: '/tmp',
+    outputDir: '/tmp/out',
+    schemasDir: '/tmp/schemas',
+    configsDir: '/tmp/configs',
+  });
+  app.bind(ContractsBindings.LOSSY_REPORTER).to({
+    report: () => undefined,
+    entries: () => [],
+  });
+
+  const binding = createBindingFromClass(ProjectScopeRecorder);
+  app.add(binding);
+
+  const runner = await app.get<EmitterRunner>(
+    ContractsEngineBindings.EMITTER_RUNNER,
+  );
+  const recorder = (await app.get<ProjectScopeRecorder>(
+    binding.key,
+  )) as ProjectScopeRecorder;
+  return {runner, recorder};
+}
+
+describe("EmitterRunner.run() respects outputScope: 'per-project'", () => {
+  it('invokes emit() exactly once with the first schema in topological order', async () => {
+    const {runner, recorder} = await buildProjectRecorderApp();
+    const a = schema('A', ['B']);
+    const b = schema('B', ['C']);
+    const c = schema('C');
+
+    await runner.run([a, b, c], {'topo-project-recorder': true});
+
+    // 3 schemas in the input, but a per-project emitter fires once.
+    // Topological order is leaves first ([C, B, A]); the runner passes
+    // the first entry (C) as `ctx.schema`.
+    expect(recorder.seen).toEqual(['C']);
+  });
+
+  it('still fires once when only one schema exists', async () => {
+    const {runner, recorder} = await buildProjectRecorderApp();
+    const only = schema('only');
+
+    await runner.run([only], {'topo-project-recorder': true});
+
+    expect(recorder.seen).toEqual(['only']);
+  });
+});

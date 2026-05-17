@@ -25,19 +25,7 @@ import {
   SourceResolverRegistry,
 } from '../../engine';
 import {ContractsEngineBindings} from '../../engine/tokens';
-import {
-  ControllerGenerator,
-  DatasourceGenerator,
-  ModelGenerator,
-  RepositoryGenerator,
-} from '../../generators';
-import type {GeneratorContext} from '../../generators/types';
-import type {
-  EmittedFile,
-  ImportMap,
-  ProjectPaths,
-  SchemaRegistry,
-} from '../../interfaces';
+import type {ImportMap, SchemaRegistry} from '../../interfaces';
 import {ContractsBindings} from '../../keys';
 import {
   GitSchemaSource,
@@ -45,11 +33,7 @@ import {
   LocalSchemaSource,
   NpmSchemaSource,
 } from '../../sources';
-import type {
-  DatasourceConfigJson,
-  LoopbackConfigJson,
-  ModelConfigJson,
-} from '../../types';
+import type {LoopbackConfigJson} from '../../types';
 
 const ROOT = join(
   tmpdir(),
@@ -347,15 +331,19 @@ describe('Pipeline end-to-end', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Stage-8 compile gate — verifies the regen-only path produces TypeScript
-// that compiles against real `@loopback/core`, `@loopback/repository`, and
-// `@loopback/rest` declarations. The pipeline does not call the LB4 base
-// generators itself (those are owned by `lb4 override`), so the test wires
-// them up directly with `includeExtension: false` to mirror the regen-only
-// shape: only `<name>.base.<kind>.ts` files exist, never the user-editable
-// extension stubs. If any base file imports a symbol that does not exist on
-// disk — the exact failure mode behind audit Critical #8 — `tsc --noEmit`
-// fails and so does this test.
+// Stage-8 compile gate — verifies the production `lb4 gen` codegen path
+// produces TypeScript that compiles against real `@loopback/core`,
+// `@loopback/repository`, and `@loopback/rest` declarations. Drives the
+// engine directly with the four LB4-idiom emit flags enabled, so the test
+// covers the same EmitterRunner -> ProjectionEmitter -> FileWriter chain
+// that PR-C wired up under `EMITTER_TAG` / `tier: 'lb4-idiom'`. The
+// `<name>.base.<kind>.ts` regen-only outputs and the `<name>.<kind>.ts`
+// skipIfExists extension stubs both land on disk in one pipeline run; both
+// sides must survive `tsc --noEmit` for stage 8 to pass.
+//
+// If any emitted base file imports a symbol that does not exist on disk
+// (the exact failure mode behind audit Critical #8) the compiler fails
+// and so does this test.
 // ---------------------------------------------------------------------------
 
 beforeAll(() => {
@@ -507,127 +495,51 @@ afterAll(() => {
 });
 
 describe('Pipeline end-to-end — stage 8 tsc gate', () => {
-  it('regen-only output compiles cleanly under tsc --noEmit', async () => {
+  it('lb4-gen output (sidecars + lb4-idiom) compiles cleanly under tsc --noEmit', async () => {
     const app = await bootstrap(ROOT_TSC, TSC_CONFIG);
     try {
       const pipeline = await app.get<Pipeline>(
         ContractsEngineBindings.PIPELINE,
       );
 
-      // First the sidecar pipeline: zod + types projections land under
-      // `src/models/` next to the regen-only base files emitted below.
-      await pipeline.run({
+      // One pipeline run exercises the production path PR-C wired up:
+      // sidecar emitters (zod, types) plus the four LB4-idiom emitters
+      // tagged under `EMITTER_TAG` (model, repository, controller,
+      // datasource). `skipTsc: false` engages stage 8 — `npx tsc --noEmit
+      // -p tsconfig.json` against the fixture's strict compiler matrix
+      // (noUncheckedIndexedAccess + exactOptionalPropertyTypes + the
+      // decorator metadata combo). Both the regen-only `<name>.base.<kind>
+      // .ts` files and the skipIfExists `<name>.<kind>.ts` extension
+      // stubs land in this single run; both sides must compile.
+      const result = await pipeline.run({
         projectRoot: ROOT_TSC,
         config: {...TSC_CONFIG, schemas: [join(ROOT_TSC, 'schemas')]},
-        emitFlags: {zod: true, types: true},
-        skipTsc: true,
+        emitFlags: {
+          zod: true,
+          types: true,
+          model: true,
+          repository: true,
+          controller: true,
+          datasource: true,
+        },
+        skipTsc: false,
       });
 
-      // The LB4 model / repository / controller / datasource base
-      // generators are owned by `lb4 override`, not by the engine
-      // pipeline. Invoke them directly with `includeExtension: false`
-      // so only `<name>.base.<kind>.ts` files exist — exactly the
-      // first-`lb4 gen`-before-`lb4 override` state the audit found
-      // unable to compile.
-      const paths = await app.get<ProjectPaths>(
-        ContractsBindings.PROJECT_PATHS,
-      );
-      const writer = await app.get<FileWriter>(
-        ContractsEngineBindings.FILE_WRITER,
-      );
-      const registry = await app.get<SchemaRegistry>(
-        ContractsBindings.SCHEMA_REGISTRY,
-      );
-      const lossy = await app.get<InMemoryLossyReporter>(
-        `services.${InMemoryLossyReporter.name}`,
-      );
-      const templates = new EjsTemplateEngine(
-        join(PROJECT_ROOT, 'src', 'templates'),
-      );
-      // Generators are invoked directly here (outside the EmitterRunner's
-      // preload sweep), so warm the cache with every template they may
-      // render before calling `generate()`.
-      const GEN_TEMPLATES_DIR = join(PROJECT_ROOT, 'src', 'templates');
-      await templates.preload([
-        join(GEN_TEMPLATES_DIR, 'model.base.ts.ejs'),
-        join(GEN_TEMPLATES_DIR, 'model.ts.ejs'),
-        join(GEN_TEMPLATES_DIR, 'repository.base.ts.ejs'),
-        join(GEN_TEMPLATES_DIR, 'repository.ts.ejs'),
-        join(GEN_TEMPLATES_DIR, 'controller.base.ts.ejs'),
-        join(GEN_TEMPLATES_DIR, 'controller.ts.ejs'),
-        join(GEN_TEMPLATES_DIR, 'datasource.base.ts.ejs'),
-        join(GEN_TEMPLATES_DIR, 'datasource.ts.ejs'),
-      ]);
-      const importMap: ImportMap = new RelativeImportMap(registry, id =>
-        join(paths.outputDir, 'models', `${kebabFromId(id)}.base.model.ts`),
-      );
-      const ctx: GeneratorContext = {
-        registry,
-        importMap,
-        templates,
-        paths,
-        lossy,
-        includeExtension: false,
-      };
+      expect(result.tscOk).toBe(true);
 
-      const modelGen = await app.get<ModelGenerator>(
-        `classes.${ModelGenerator.name}`,
-      );
-      const repoGen = await app.get<RepositoryGenerator>(
-        `classes.${RepositoryGenerator.name}`,
-      );
-      const controllerGen = await app.get<ControllerGenerator>(
-        `classes.${ControllerGenerator.name}`,
-      );
-      const dsGen = await app.get<DatasourceGenerator>(
-        `classes.${DatasourceGenerator.name}`,
-      );
-
-      const customerSchema = registry.get('customer.v1');
-      const orderSchema = registry.get('order.v1');
-      expect(customerSchema).toBeDefined();
-      expect(orderSchema).toBeDefined();
-
-      const customerConfig = readModelConfig(
-        join(ROOT_TSC, 'configs', 'customer.config.json'),
-      );
-      const orderConfig = readModelConfig(
-        join(ROOT_TSC, 'configs', 'order.config.json'),
-      );
-      const dsConfig: DatasourceConfigJson = {
-        name: 'primary',
-        adapter: 'memory',
-        config: {},
-      };
-
-      const emitted: EmittedFile[] = [
-        ...modelGen.generate(customerSchema!, customerConfig, ctx),
-        ...modelGen.generate(orderSchema!, orderConfig, ctx),
-        ...repoGen.generate(customerSchema!, customerConfig, ctx),
-        ...repoGen.generate(orderSchema!, orderConfig, ctx),
-        ...controllerGen.generate(customerSchema!, customerConfig, ctx),
-        ...controllerGen.generate(orderSchema!, orderConfig, ctx),
-        ...dsGen.generate('primary', dsConfig, ctx),
-      ];
-
-      // Controller / datasource generators emit paths already rooted at
-      // `src/` (override.ts does the same `stripLeadingSrc` here);
-      // model / repository generators emit relative-to-`outputDir`
-      // paths. Anchor everything at `<root>/src` so the layout matches
-      // what a real `lb4 gen + lb4 override` run produces.
-      const normalised = emitted.map(file => ({
-        ...file,
-        path: file.path.startsWith('src/') ? file.path.slice(4) : file.path,
-      }));
-
-      await writer.writeAll(paths.outputDir, normalised);
-
-      // All four projections produced at least one base file each.
+      // Every LB4-idiom emitter produced its base file (regen) plus the
+      // extension stub (skipIfExists, written on first run).
       expect(
         existsSync(join(ROOT_TSC, 'src', 'models', 'customer.base.model.ts')),
       ).toBe(true);
       expect(
+        existsSync(join(ROOT_TSC, 'src', 'models', 'customer.model.ts')),
+      ).toBe(true);
+      expect(
         existsSync(join(ROOT_TSC, 'src', 'models', 'order.base.model.ts')),
+      ).toBe(true);
+      expect(
+        existsSync(join(ROOT_TSC, 'src', 'models', 'order.model.ts')),
       ).toBe(true);
       expect(
         existsSync(
@@ -654,43 +566,10 @@ describe('Pipeline end-to-end — stage 8 tsc gate', () => {
           join(ROOT_TSC, 'src', 'datasources', 'primary.base.datasource.ts'),
         ),
       ).toBe(true);
-
-      // Now the actual gate: re-run the pipeline with `skipTsc: false`
-      // so stage 8 invokes `npx tsc --noEmit -p tsconfig.json` against
-      // the fixture project root. The pipeline's own files are
-      // unchanged from the first run; `skipTsc: false` is what proves
-      // every emitted `.ts` file under `src/` survives the strict
-      // compiler matrix declared above.
-      const verified = await pipeline.run({
-        projectRoot: ROOT_TSC,
-        config: {...TSC_CONFIG, schemas: [join(ROOT_TSC, 'schemas')]},
-        emitFlags: {zod: true, types: true},
-        skipTsc: false,
-        validateOnly: false,
-      });
-      expect(verified.tscOk).toBe(true);
     } finally {
       await app.stop();
     }
-  }, // @loopback packages takes well over the suite-wide 30s default. // `npx tsc` cold start plus full project type-check against the real
-  120_000);
+    // `npx tsc` cold start plus the full project type-check against real
+    // @loopback packages takes well over the suite-wide 30s default.
+  }, 120_000);
 });
-
-/**
- * Mirror of `model-generator.classNameFromId` + `toKebab` for the test's
- * import-map override. Keeping the regex local avoids a brittle dependency
- * on private generator helpers.
- */
-function kebabFromId(id: string): string {
-  const stem = id.replace(/\.v\d+$/i, '');
-  return stem
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-    .replace(/[\s_.]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .toLowerCase();
-}
-
-function readModelConfig(path: string): ModelConfigJson {
-  return JSON.parse(readFileSync(path, 'utf8')) as ModelConfigJson;
-}

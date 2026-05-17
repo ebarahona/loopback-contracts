@@ -133,7 +133,22 @@ export class EmitterRunner {
     const output: EmittedFile[] = [];
 
     for (const emitter of orderedEmitters) {
-      for (const schema of orderedSchemas) {
+      // Per-project emitters (e.g. `datasource`) declare their output as
+      // a project-level resource that has no `$contractId` linkage to any
+      // one schema. Invoke them once per run with the first schema in
+      // topological order so the `EmitterContext` shape stays uniform —
+      // `ctx.schema` still references a real schema, and emitters that
+      // care about the full schema set can iterate `ctx.registry.list()`.
+      //
+      // The default `'per-schema'` scope keeps the existing fan-out: one
+      // `emit()` call per `(emitter, schema)` pair, matching how sidecars
+      // and model/repository/controller project.
+      const schemasForEmitter =
+        emitter.outputScope === 'per-project'
+          ? orderedSchemas.slice(0, 1)
+          : orderedSchemas;
+
+      for (const schema of schemasForEmitter) {
         const before = this.reporter.entries().length;
         const context = this.buildContext(emitter, schema);
 

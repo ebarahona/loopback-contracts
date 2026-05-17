@@ -242,10 +242,15 @@ function seedProject(root: string): void {
 // Test case 1 — `lb4 override <kind> <contract>` for every supported kind
 //
 // Each iteration boots a transient `Application`, mounts `ContractsComponent`,
-// resolves `FileWriter` + the requested generator through the DI graph, runs
-// `generate()` with `includeExtension: true`, and writes the extension stub
-// to disk. A wrong binding key throws `BindingError` at `app.get(...)` —
-// that's the runtime symptom Critical #1 produced.
+// resolves `FileWriter` + the requested generator through the DI graph, calls
+// the generator's `generate(schema, config, ctx)` shim, and writes the
+// extension stub to disk. After PR-C the generators became `ProjectionEmitter`
+// contributions and the engine drives them through `emit()` for `lb4 gen`;
+// `generate()` is retained as a `@deprecated` back-compat method specifically
+// so this override path keeps working without a second bootstrap. A wrong
+// binding key throws `BindingError` at `app.get(...)` — that's the runtime
+// symptom Critical #1 produced; running every kind here also acts as the
+// regression guard for the `generate()` shim itself.
 // ---------------------------------------------------------------------------
 
 describe('lb4 override — DI binding resolution', () => {
