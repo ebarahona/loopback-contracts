@@ -4,7 +4,9 @@ import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {validateManifest} from '../../engine/emitter-manifest';
 import {ManifestEmitterBooter} from '../../engine/manifest-emitter-booter';
+import {ContractsValidationError} from '../../helpers';
 import {EMITTER_TAG} from '../../keys';
 
 interface LegacyManifestFixture {
@@ -239,5 +241,22 @@ describe('ManifestEmitterBooter plural outputs[]', () => {
     } finally {
       rmSync(scopedRoot, {recursive: true, force: true});
     }
+  });
+
+  it('rejects outputScope values outside the enum', () => {
+    expect(() =>
+      validateManifest({
+        kind: 'bad-scope-fixture',
+        tier: 'convenience',
+        description: 'bad scope fixture',
+        outputScope: 'random-value',
+        outputs: [
+          {
+            template: '/tmp/bad-scope.ejs',
+            path: 'models/{{kebabName}}.bad.ts',
+          },
+        ],
+      }),
+    ).toThrow(ContractsValidationError);
   });
 });

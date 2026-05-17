@@ -55,7 +55,7 @@ const TIER_ORDER: Readonly<Record<ProjectionEmitter['tier'], number>> = {
  * Frozen at module scope so a misbehaving emitter cannot mutate it and
  * corrupt later runs sharing the same module instance.
  */
-const EMPTY_PROJECT_SCHEMA: JSONSchema = Object.freeze({
+const EMPTY_PROJECT_SCHEMA: Readonly<JSONSchema> = Object.freeze({
   $id: '__project__',
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
@@ -176,25 +176,6 @@ export class EmitterRunner {
         const before = this.reporter.entries().length;
         const context = this.buildContext(emitter, schema);
 
-        // Fail-fast guard for the `lb4-idiom` tier: these emitters depend
-        // on the ConfigRegistry to resolve per-project knobs. The runner
-        // itself always has a non-optional `configs` injection, but a
-        // custom EmitterContext built outside the runner (e.g. a test
-        // harness) could still pass `undefined`. Surface that as a typed
-        // error naming the offending emitter rather than letting the
-        // emitter no-op or crash later with an unrelated message.
-        if (emitter.tier === 'lb4-idiom' && context.configs === undefined) {
-          throw new ContractsCodegenError(
-            `Emitter '${emitter.kind}' requires ConfigRegistry to be bound; ` +
-              `ensure the application registered ContractsComponent`,
-            {
-              emitterKind: emitter.kind,
-              schemaId:
-                typeof schema.$id === 'string' ? schema.$id : '<unknown>',
-            },
-          );
-        }
-
         let produced: EmittedFile[];
         try {
           // Emitters may return either `EmittedFile[]` or `Promise<EmittedFile[]>`
@@ -229,16 +210,14 @@ export class EmitterRunner {
   ): EmitterContext {
     const optionsKey = `x-${emitter.kind}`;
     const options = (schema as Record<string, unknown>)[optionsKey];
-    // Shallow-freeze the schema before handing it off. The interface
-    // already documents that emitters must treat `ctx.schema` as
-    // read-only, but a per-project emitter that mutates the top-level
-    // reference would silently corrupt the schema seen by every
-    // subsequent emitter in the same run. A shallow freeze stops the
-    // mutation paths that matter in practice — emitters mutate
-    // top-level fields, not deeply nested ones — without paying the
-    // cost of a deep walk over potentially large schema trees. Freezing
-    // an already-frozen object (e.g. the synthetic empty schema) is a
-    // no-op.
+    // Shallow-freeze: blocks `schema.foo = X` but not nested writes like
+    // `schema.properties.bar = X`. The interface contract still says
+    // "treat every field as read-only" — emitters must not write through
+    // any reference reachable from the schema, frozen or not. Deep freeze
+    // would O(n) traverse on every (emitter, schema) pair and the
+    // realistic mutation surface (`json-schema-to-typescript`'s consumer
+    // in types-emitter) already deep-clones. Freezing an already-frozen
+    // object (e.g. the synthetic empty schema) is a no-op.
     Object.freeze(schema);
     const ctx: EmitterContext = {
       schema,

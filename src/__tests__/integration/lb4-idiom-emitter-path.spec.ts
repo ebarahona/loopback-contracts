@@ -18,13 +18,7 @@ import {
   SourceResolverRegistry,
 } from '../../engine';
 import {ContractsEngineBindings} from '../../engine/tokens';
-import {ContractsCodegenError} from '../../helpers';
-import type {
-  EmitterContext,
-  ImportMap,
-  JSONSchema,
-  SchemaRegistry,
-} from '../../interfaces';
+import type {ImportMap, SchemaRegistry} from '../../interfaces';
 import {ContractsBindings} from '../../keys';
 import {
   GitSchemaSource,
@@ -32,7 +26,6 @@ import {
   LocalSchemaSource,
   NpmSchemaSource,
 } from '../../sources';
-import {ModelGenerator} from '../../generators';
 import type {LoopbackConfigJson} from '../../types';
 
 // Two fixture trees: one with model configs (lb4-idiom emitters fire), one
@@ -433,35 +426,6 @@ describe('LB4-idiom emitter path — edge cases (PR-C follow-up)', () => {
     }
   });
 
-  // Scenario (b): driving `ModelGenerator.emit()` directly with a
-  // hand-built `EmitterContext` that omits the optional `configs`
-  // registry. The runner's fail-fast guard (`emitter-runner.ts`) throws
-  // before reaching `emit()` when going through the runner — this case
-  // pokes the generator directly to confirm the contract is enforced at
-  // the runner boundary, not silently inside the generator. The
-  // generator's documented behavior on a missing per-contract config is
-  // to return `[]` (see `model-generator.ts`), so the failure mode lives
-  // in the runner, not the emitter. Skipping here because the assertion
-  // depends on the runner's fail-fast guard which is exercised by other
-  // specs; the generator-direct path simply returns `[]` and is not the
-  // load-bearing surface for this finding.
-  it.skip('throws ContractsCodegenError when ConfigRegistry is missing (runner-level guard)', () => {
-    // TODO: this scenario is exercised at the runner boundary in
-    // `emitter-runner.ts` (the `emitter.tier === 'lb4-idiom' &&
-    // context.configs === undefined` guard throws `ContractsCodegenError`
-    // naming the kind). Calling `ModelGenerator.emit()` directly with
-    // `configs: undefined` returns `[]` by design (no-config sidecar
-    // projects), so the fail-fast contract is properly the runner's, not
-    // the generator's. Left as a documented skip to flag the asymmetry.
-    const generator = new ModelGenerator();
-    const schema: JSONSchema = {$id: 'person.v1', type: 'object'};
-    // Hand-rolled, intentionally minimal context — fields the generator
-    // would consult on the unhappy path are omitted because the
-    // fail-fast guard should fire before any of them are dereferenced.
-    const ctx = {schema, configs: undefined} as unknown as EmitterContext;
-    expect(() => generator.emit(ctx)).toThrow(ContractsCodegenError);
-  });
-
   // Scenario (c): per-project emitter fires exactly once on a 5-schema
   // project. Under the pre-PR-C per-schema scope this would have produced
   // 5 copies of `mem.base.datasource.ts` and tripped `FileWriter`'s
@@ -490,20 +454,5 @@ describe('LB4-idiom emitter path — edge cases (PR-C follow-up)', () => {
     } finally {
       await app.stop();
     }
-  });
-
-  // Scenario (d): stage-5 partial-failure resets the config registry.
-  // Not observable from the public pipeline surface — the registry is
-  // internal state and the only way a partial-failure surfaces externally
-  // is through the next `pipeline.run()` not seeing stale entries. The
-  // existing pipeline-stages unit spec covers the reset semantics at the
-  // engine boundary; an integration assertion would require a hand-rolled
-  // double-run with an intermediate bad config that's hard to make
-  // load-bearing without duplicating the unit spec.
-  it.skip('stage-5 partial failure resets the config registry (covered by stage-5 try/catch internally)', () => {
-    // Engine-internal: `pipeline.ts` stage 5 wraps the `configs/*` walk
-    // in a try/catch that calls `InMemoryConfigRegistry._reset()` on
-    // throw, leaving the registry empty rather than half-populated. Not
-    // observable from this integration surface.
   });
 });

@@ -616,7 +616,10 @@ export class Pipeline {
 
     // Validate every configs/*.config.json on disk.
     const configFiles = await listConfigFiles(this.paths.configsDir);
-    // stage-5 must leave the registry either fully populated or fully empty — no partial state.
+    // stage-5 must leave the registry either fully populated or fully empty — no
+    // partial state. The try below encloses BOTH the per-file disk-config
+    // populate loop AND the follow-up inline `config-bindings` validation so
+    // that any throw from either step triggers `_reset()` before rethrow.
     try {
       for (const file of configFiles) {
         const raw = await readFile(file, 'utf8');
@@ -656,26 +659,26 @@ export class Pipeline {
           this.configs.add(json as unknown as ModelConfigJson);
         }
       }
+
+      // Validate inline `config-bindings` entries in `loopback.config.json`.
+      const inline = opts.config['config-bindings'];
+      if (Array.isArray(inline)) {
+        for (const [i, entry] of inline.entries()) {
+          const ok = validate(entry);
+          if (!ok) {
+            throw new ContractsValidationError(
+              `stage 5: loopback.config.json.config-bindings[${i}] failed meta-schema validation:\n${formatAjvErrors(validate.errors)}`,
+              {
+                sourcePath: 'loopback.config.json',
+                instancePath: `/config-bindings/${i}${validate.errors?.[0]?.instancePath ?? ''}`,
+              },
+            );
+          }
+        }
+      }
     } catch (err) {
       this.configs._reset();
       throw err;
-    }
-
-    // Validate inline `config-bindings` entries in `loopback.config.json`.
-    const inline = opts.config['config-bindings'];
-    if (Array.isArray(inline)) {
-      for (const [i, entry] of inline.entries()) {
-        const ok = validate(entry);
-        if (!ok) {
-          throw new ContractsValidationError(
-            `stage 5: loopback.config.json.config-bindings[${i}] failed meta-schema validation:\n${formatAjvErrors(validate.errors)}`,
-            {
-              sourcePath: 'loopback.config.json',
-              instancePath: `/config-bindings/${i}${validate.errors?.[0]?.instancePath ?? ''}`,
-            },
-          );
-        }
-      }
     }
 
     return datasources;
