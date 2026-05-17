@@ -91,14 +91,30 @@ export class ManifestEmitterBooter implements LifeCycleObserver {
   }
 
   private async runStart(): Promise<void> {
-    const manifestDir = join(this.projectRoot, 'emitters');
-    const manifestFiles = await listManifestFiles(manifestDir);
+    // Two manifest sources, in priority order:
+    //   1. Built-in manifests shipped with the plugin (under <plugin-dist>/
+    //      emitters/manifest/<kind>/emitter.json). Discovered via __dirname
+    //      so the lookup tracks the compiled location at runtime.
+    //   2. Project-local manifests authored by the consumer (under
+    //      <projectRoot>/emitters/*.emitter.json).
+    // Both register under EMITTER_TAG; project-local manifests can override
+    // a built-in by declaring the same `kind` (last-write-wins by binding
+    // order — see EmitterRegistry.validateUniqueness for the conflict
+    // diagnostic).
+    const builtinDir = join(__dirname, '..', 'emitters', 'manifest');
+    const builtinFiles = await listBuiltinManifestFiles(builtinDir);
+    const projectDir = join(this.projectRoot, 'emitters');
+    const projectFiles = await listManifestFiles(projectDir);
+    const manifestFiles: {file: string; origin: 'builtin' | 'project'}[] = [
+      ...builtinFiles.map(f => ({file: f, origin: 'builtin' as const})),
+      ...projectFiles.map(f => ({file: f, origin: 'project' as const})),
+    ];
     if (manifestFiles.length === 0) return;
 
     const ajv = new Ajv2020({allErrors: true, strict: false});
     const validateMeta = ajv.compile(buildEmitterManifestMetaSchema());
 
-    for (const file of manifestFiles) {
+    for (const {file, origin} of manifestFiles) {
       const raw = await readJson(file);
       if (!validateMeta(raw)) {
         const first = validateMeta.errors?.[0];
@@ -113,15 +129,23 @@ export class ManifestEmitterBooter implements LifeCycleObserver {
       }
       const manifest = validateManifest(raw);
       const templatePath = resolveTemplatePath(file, manifest);
-      // Per-output template paths in plural-form manifests resolve against
-      // the project root by convention (per the doc's "templates/<name>/*.ejs"
-      // layout). Absolute paths pass through. The booter pre-resolves so
-      // ManifestBackedEmitter only deals with absolute paths.
-      const outputTemplatePaths = (manifest.outputs ?? []).map(o =>
-        isAbsolute(o.template)
-          ? o.template
-          : resolve(this.projectRoot, o.template),
-      );
+      // Per-output template paths in plural-form manifests:
+      //   - Absolute paths pass through unchanged.
+      //   - Built-in manifests (shipped under <plugin-dist>/emitters/manifest/
+      //     <kind>/) resolve relative paths against the manifest's own
+      //     directory, so `templates/foo.ejs` points to a sibling file the
+      //     plugin's copy-templates script lifted into dist.
+      //   - Project-local manifests resolve against the project root by
+      //     convention (the doc's `templates/<name>/*.ejs` layout), so
+      //     consumer authors can keep templates outside `emitters/`.
+      // The booter pre-resolves so ManifestBackedEmitter only deals with
+      // absolute paths.
+      const manifestDir = dirname(file);
+      const outputTemplatePaths = (manifest.outputs ?? []).map(o => {
+        if (isAbsolute(o.template)) return o.template;
+        const anchor = origin === 'builtin' ? manifestDir : this.projectRoot;
+        return resolve(anchor, o.template);
+      });
 
       const bindingKey = `platform.contracts.emitters.manifest.${manifest.kind}`;
       this.app
@@ -166,6 +190,36 @@ export class ManifestEmitterBooter implements LifeCycleObserver {
  * order. Returns `[]` (without throwing) when the directory does not exist —
  * projects without a `emitters/` folder are a supported configuration.
  */
+/**
+ * List built-in manifest files shipped with the plugin. Layout convention:
+ * `<plugin-dist>/emitters/manifest/<kind>/emitter.json` (one subdirectory
+ * per built-in kind, with `emitter.json` + a sibling templates directory).
+ * Returns `[]` when the dir doesn't exist (no built-in manifests shipped
+ * yet — fine).
+ */
+async function listBuiltinManifestFiles(dir: string): Promise<string[]> {
+  try {
+    const stats = await stat(dir);
+    if (!stats.isDirectory()) return [];
+  } catch {
+    return [];
+  }
+  const subdirs = await readdir(dir, {withFileTypes: true});
+  const out: string[] = [];
+  for (const sub of subdirs) {
+    if (!sub.isDirectory()) continue;
+    const manifestPath = join(dir, sub.name, 'emitter.json');
+    try {
+      await stat(manifestPath);
+      out.push(manifestPath);
+    } catch {
+      // Skip kinds that don't have an emitter.json — author error or
+      // partial migration. Validated at boot if present.
+    }
+  }
+  return out.sort();
+}
+
 async function listManifestFiles(dir: string): Promise<string[]> {
   try {
     const stats = await stat(dir);

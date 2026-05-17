@@ -15,6 +15,10 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const copies = [
   {from: 'src/templates', to: 'dist/templates'},
   {from: 'src/cli/templates', to: 'dist/cli/templates'},
+  // Built-in manifest emitters ship their .emitter.json + .ejs templates
+  // alongside the compiled JS so ManifestEmitterBooter can scan
+  // <plugin-dist>/emitters/manifest/ at runtime.
+  {from: 'src/emitters/manifest', to: 'dist/emitters/manifest'},
 ];
 
 async function copyTree(srcDir, destDir) {

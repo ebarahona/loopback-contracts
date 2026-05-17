@@ -1,0 +1,12 @@
+{
+  "$schema": "../../../../dist/_meta/emitter.schema.json",
+  "kind": "openapi-components",
+  "tier": "convenience",
+  "description": "OAS 3.x components fragment (mount into OpenAPI documents)",
+  "outputs": [
+    {
+      "template": "./templates/openapi-components.yaml.ejs",
+      "path": "models/{{kebabName}}.openapi-components.yaml"
+    }
+  ]
+}

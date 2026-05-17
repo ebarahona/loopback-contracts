@@ -1,6 +1,6 @@
 import {resolve} from 'node:path';
 import {describe, expect, it} from 'vitest';
-import {AsyncAPIEmitter} from '../../emitters/asyncapi-emitter';
+import {AsyncAPIEmitter} from '../../emitters/semantic/asyncapi-emitter';
 import {EjsTemplateEngine} from '../../engine/template-engine';
 import type {EmitterContext, JSONSchema} from '../../interfaces';
 

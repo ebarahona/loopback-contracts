@@ -1,0 +1,24 @@
+{
+  "$schema": "../../../../dist/_meta/emitter.schema.json",
+  "kind": "cloudevents",
+  "tier": "real-translation",
+  "description": "Typed CloudEvent<T> wrappers (uses official cloudevents package)",
+  "peerDeps": ["cloudevents"],
+  "optIn": true,
+  "perSchemaOptionsSchema": {
+    "type": "object",
+    "properties": {
+      "type": {"type": "string"},
+      "source": {"type": "string"},
+      "subject": {"type": "string"}
+    },
+    "required": ["type"],
+    "additionalProperties": false
+  },
+  "outputs": [
+    {
+      "template": "./templates/cloudevents.ts.ejs",
+      "path": "models/{{kebabName}}.cloudevents.ts"
+    }
+  ]
+}

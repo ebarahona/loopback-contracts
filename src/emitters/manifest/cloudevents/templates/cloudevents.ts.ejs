@@ -1,7 +1,16 @@
 <%
-const Name = name;
-const eventType_ = eventType;
-const typesImport_ = typesImport;
+// Typed CloudEvent<T> wrapper + factory for one source schema. Locals from
+// ManifestBackedEmitter: `schema` (raw JSONSchema), `options` (validated
+// `x-cloudevents` block — `type` is required), `className` (PascalCase
+// from schema $id stem), `schemaId`.
+//
+// The sibling `<kebab>.types.ts` written by the types emitter supplies
+// the payload type; co-enabling `--emit-types` is the documented happy
+// path. The import is structural — a missing file surfaces at
+// `tsc --noEmit` rather than at codegen.
+const Name = className;
+const eventType_ = options.type;
+const typesImport_ = './' + h.kebab(className) + '.types';
 %>import {CloudEvent} from 'cloudevents';
 import type {<%- Name %>} from '<%- typesImport_ %>';
 

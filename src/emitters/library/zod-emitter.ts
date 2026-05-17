@@ -4,15 +4,15 @@ import {
   ContractsValidationError,
   toKebab,
   toPascal,
-} from '../helpers';
+} from '../../helpers';
 import type {
   EmittedFile,
   EmitterContext,
   JSONSchema,
   LossyReport,
   ProjectionEmitter,
-} from '../interfaces';
-import {ContractsBindings} from '../keys';
+} from '../../interfaces';
+import {ContractsBindings} from '../../keys';
 
 /**
  * Lossy features the emitter promotes to hard errors in `--strict` mode.

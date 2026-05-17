@@ -287,6 +287,7 @@ export function buildEmitterManifestMetaSchema(): JSONSchema {
       description: {type: 'string'},
       peerDeps: {type: 'array', items: {type: 'string'}},
       perSchemaOptionsSchema: {type: 'object'},
+      optIn: {type: 'boolean'},
       // Plural form — preferred.
       outputs: {
         type: 'array',

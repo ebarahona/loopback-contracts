@@ -5,7 +5,7 @@ import {
   ContractsPeerDepMissingError,
   ContractsValidationError,
   toKebab,
-} from '../helpers';
+} from '../../helpers';
 import type {
   EmittedFile,
   EmitterContext,
@@ -13,8 +13,8 @@ import type {
   LossyReporter,
   ProjectionEmitter,
   SchemaRegistry,
-} from '../interfaces';
-import {ContractsBindings} from '../keys';
+} from '../../interfaces';
+import {ContractsBindings} from '../../keys';
 
 const PEER_DEP = 'json-schema-faker';
 const DEFAULT_COUNT = 1;

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {MockDataEmitter} from '../../emitters/mock-data-emitter';
+import {MockDataEmitter} from '../../emitters/library/mock-data-emitter';
 import type {EmitterContext, JSONSchema} from '../../interfaces';
 
 const FIXTURE: JSONSchema = {

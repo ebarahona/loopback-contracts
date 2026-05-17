@@ -3,12 +3,16 @@
 // list — never re-order existing entries (the order is the deterministic
 // stable-sort tie-breaker the runner relies on for snapshot diffs).
 
-export {OpenAPIComponentsEmitter} from './openapi-components-emitter';
-export {TypesEmitter} from './types-emitter';
-export {ZodEmitter} from './zod-emitter';
-export {GraphQLEmitter} from './graphql-emitter';
-export {CloudEventsEmitter} from './cloudevents-emitter';
-export {AsyncAPIEmitter} from './asyncapi-emitter';
-export {ProtoEmitter} from './proto-emitter';
-export {AvroEmitter} from './avro-emitter';
-export {MockDataEmitter} from './mock-data-emitter';
+// Built-in manifest emitters discovered by `ManifestEmitterBooter` at
+// runtime (no TS export needed): `cloudevents` (under
+// `src/emitters/manifest/cloudevents/`), `openapi-components` (under
+// `src/emitters/manifest/openapi-components/`).
+
+export {TypesEmitter} from './library/types-emitter';
+export {ZodEmitter} from './library/zod-emitter';
+export {MockDataEmitter} from './library/mock-data-emitter';
+
+export {GraphQLEmitter} from './semantic/graphql-emitter';
+export {AsyncAPIEmitter} from './semantic/asyncapi-emitter';
+export {ProtoEmitter} from './semantic/proto-emitter';
+export {AvroEmitter} from './semantic/avro-emitter';

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {ZodEmitter} from '../../emitters/zod-emitter';
+import {ZodEmitter} from '../../emitters/library/zod-emitter';
 import type {EmitterContext, JSONSchema} from '../../interfaces';
 
 const FIXTURE: JSONSchema = {

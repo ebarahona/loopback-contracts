@@ -86,6 +86,18 @@ export interface EmitterManifest {
   readonly perSchemaOptionsSchema?: JSONSchema;
 
   /**
+   * When `true`, the emitter is opt-in per schema: it emits nothing for
+   * schemas that don't declare an `x-<kind>` block. Useful for projection
+   * kinds where the schema author has to explicitly tag a contract before
+   * it makes sense to project — e.g., CloudEvents wrappers need a
+   * deliberate `x-cloudevents.type` value, not every contract is an event.
+   *
+   * Defaults to `false`: the emitter fires per schema whenever the global
+   * `--emit-<kind>` flag is on.
+   */
+  readonly optIn?: boolean;
+
+  /**
    * Plural outputs. Each entry renders one EJS template to one path per
    * schema. Path templates use `{{name}}` interpolation against a small
    * fixed context — see {@link interpolatePath} for the available
@@ -199,6 +211,13 @@ export function validateManifest(raw: unknown): EmitterManifest {
     );
   }
 
+  if (obj['optIn'] !== undefined && typeof obj['optIn'] !== 'boolean') {
+    throw shapeError(
+      "manifest 'optIn' must be a boolean when present",
+      '/optIn',
+    );
+  }
+
   if (obj['outputDir'] !== undefined && typeof obj['outputDir'] !== 'string') {
     throw shapeError(
       "manifest 'outputDir' must be a string when present",
@@ -275,6 +294,9 @@ export function validateManifest(raw: unknown): EmitterManifest {
     Object.assign(manifest, {
       perSchemaOptionsSchema: obj['perSchemaOptionsSchema'] as JSONSchema,
     });
+  }
+  if (obj['optIn'] !== undefined) {
+    Object.assign(manifest, {optIn: obj['optIn'] as boolean});
   }
   // Preserve the legacy fields on the returned object too, for diagnostics
   // and serialisation round-trips. Only fields the author actually wrote

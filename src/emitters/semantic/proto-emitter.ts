@@ -7,15 +7,15 @@ import {
   splitWords,
   toKebab,
   toPascal,
-} from '../helpers';
+} from '../../helpers';
 import type {
   EmittedFile,
   EmitterContext,
   JSONSchema,
   LossyReporter,
   ProjectionEmitter,
-} from '../interfaces';
-import {ContractsBindings} from '../keys';
+} from '../../interfaces';
+import {ContractsBindings} from '../../keys';
 
 const PEER_DEP = 'quicktype-core';
 

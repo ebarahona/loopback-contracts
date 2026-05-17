@@ -7,10 +7,8 @@ import {
 import {
   AsyncAPIEmitter,
   AvroEmitter,
-  CloudEventsEmitter,
   GraphQLEmitter,
   MockDataEmitter,
-  OpenAPIComponentsEmitter,
   ProtoEmitter,
   TypesEmitter,
   ZodEmitter,
@@ -87,9 +85,10 @@ export class ContractsComponent implements Component {
     // -------------------------------------------------------------------
     createBindingFromClass(ZodEmitter),
     createBindingFromClass(TypesEmitter),
-    createBindingFromClass(OpenAPIComponentsEmitter),
+    // `openapi-components` and `cloudevents` are shipped as built-in
+    // manifest emitters (src/emitters/manifest/<kind>/) discovered by the
+    // ManifestEmitterBooter at startup — no class binding required here.
     createBindingFromClass(GraphQLEmitter),
-    createBindingFromClass(CloudEventsEmitter),
     createBindingFromClass(AsyncAPIEmitter),
     createBindingFromClass(ProtoEmitter),
     createBindingFromClass(AvroEmitter),

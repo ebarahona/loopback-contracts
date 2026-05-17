@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {TypesEmitter} from '../../emitters/types-emitter';
+import {TypesEmitter} from '../../emitters/library/types-emitter';
 import type {
   EmitterContext,
   JSONSchema,

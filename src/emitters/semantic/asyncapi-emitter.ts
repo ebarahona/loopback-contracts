@@ -1,15 +1,15 @@
 import {BindingScope, injectable} from '@loopback/core';
 import Ajv2020 from 'ajv/dist/2020';
 import {resolve} from 'node:path';
-import {ContractsValidationError, toKebab, toPascal} from '../helpers';
+import {ContractsValidationError, toKebab, toPascal} from '../../helpers';
 import type {
   EmittedFile,
   EmitterContext,
   JSONSchema,
   LossyReporter,
   ProjectionEmitter,
-} from '../interfaces';
-import {ContractsBindings} from '../keys';
+} from '../../interfaces';
+import {ContractsBindings} from '../../keys';
 
 /**
  * Per-schema options block the AsyncAPI emitter reads from `x-asyncapi` on
@@ -27,6 +27,7 @@ export interface AsyncAPIPerSchemaOptions {
 
 const TEMPLATE_PATH = resolve(
   __dirname,
+  '..',
   '..',
   'templates',
   'asyncapi.yaml.ejs',

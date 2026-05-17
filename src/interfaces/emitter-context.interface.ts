@@ -39,7 +39,7 @@ export type JSONSchema = {
    * option is typed `boolean | 'preserve'`). Subschema values are accepted
    * for spec compliance but are flattened to `true` by the types emitter
    * with a lossy report — see
-   * `src/emitters/types-emitter.ts` for the coercion path.
+   * `src/emitters/library/types-emitter.ts` for the coercion path.
    */
   additionalProperties?: boolean | 'preserve' | JSONSchema;
   [k: string]: unknown;

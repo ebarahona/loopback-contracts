@@ -1,6 +1,6 @@
 import {BindingScope, injectable} from '@loopback/core';
 import Ajv2020 from 'ajv/dist/2020';
-import {ContractsValidationError, toKebab, toPascal} from '../helpers';
+import {ContractsValidationError, toKebab, toPascal} from '../../helpers';
 import type {
   EmittedFile,
   EmitterContext,
@@ -9,8 +9,8 @@ import type {
   LossyReporter,
   ProjectionEmitter,
   SchemaRegistry,
-} from '../interfaces';
-import {ContractsBindings} from '../keys';
+} from '../../interfaces';
+import {ContractsBindings} from '../../keys';
 
 const DEFAULT_NAMESPACE = 'com.example.contracts';
 

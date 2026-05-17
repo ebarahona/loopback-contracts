@@ -92,6 +92,8 @@ interface ResolvedOutput {
  */
 export class ManifestBackedEmitter implements ProjectionEmitter {
   readonly kind: string;
+  /** Whether the emitter skips schemas with no `x-<kind>` block. */
+  private readonly optIn: boolean;
   /**
    * Display suffix surfaced through {@link EmitterRegistry.listMetadata}.
    *
@@ -132,6 +134,7 @@ export class ManifestBackedEmitter implements ProjectionEmitter {
     this.kind = manifest.kind;
     this.tier = manifest.tier;
     this.description = manifest.description;
+    this.optIn = manifest.optIn === true;
     if (manifest.peerDeps !== undefined) {
       // ProjectionEmitter declares `peerDeps` as a mutable `string[]`; copy
       // out of the readonly manifest array to satisfy the interface without
@@ -184,6 +187,12 @@ export class ManifestBackedEmitter implements ProjectionEmitter {
   emit(ctx: EmitterContext): EmittedFile[] {
     const optionsKey = `x-${this.kind}`;
     const options: unknown = ctx.schema[optionsKey];
+
+    // Opt-in emitters skip schemas that don't declare an x-<kind> block at
+    // all — the schema author has to explicitly tag a contract before
+    // emission makes sense (CloudEvents wrappers, for instance, only
+    // belong on contracts the author has marked as events).
+    if (this.optIn && options === undefined) return [];
 
     if (
       this.compiledOptionsValidator !== undefined &&

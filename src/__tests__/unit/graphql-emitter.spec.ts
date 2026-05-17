@@ -1,6 +1,6 @@
 import {resolve} from 'node:path';
 import {describe, expect, it} from 'vitest';
-import {GraphQLEmitter} from '../../emitters/graphql-emitter';
+import {GraphQLEmitter} from '../../emitters/semantic/graphql-emitter';
 import {EjsTemplateEngine} from '../../engine/template-engine';
 import type {EmitterContext, JSONSchema} from '../../interfaces';
 

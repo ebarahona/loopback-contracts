@@ -1,0 +1,125 @@
+<%
+// Hand-rendered YAML for a single OAS 3.x `components.schemas.<Name>`
+// fragment. Locals from ManifestBackedEmitter: `schema` (raw JSONSchema),
+// `className` (PascalCase from schema $id stem), `schemaId`.
+//
+// Projection rules applied here (the old code emitter ran these in TS
+// before handing the projected schema to the template; the manifest path
+// gives templates the raw schema so the same logic is inlined):
+//   - Strip top-level `$id` / `$schema` (OAS keys components by the map key).
+//   - Inject `type: 'object'` when the schema declares `properties` without
+//     an explicit `type` — OAS 3.1 resolvers expect it.
+//   - Rewrite cross-document `$ref` strings (`'customer.v1'`) into the
+//     `'#/components/schemas/Customer'` form OAS resolvers expect.
+//   - Strip a trailing `.vN` segment from the component name + ref targets,
+//     so `user.v1` keys as `User` (the file path carries the version).
+//
+// Mounted by the engine's FileWriter under a `#` header comment so the
+// whole file stays a valid YAML document.
+
+function stripVersionSuffix(id) {
+  return id.replace(/\.v\d+$/, '');
+}
+
+function toPascalLocal(s) {
+  return String(s)
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('');
+}
+
+function rewriteRef(ref) {
+  if (ref.startsWith('#')) return ref;
+  if (/^[a-z]+:\/\//i.test(ref)) return ref;
+  const hashIdx = ref.indexOf('#');
+  const id = hashIdx === -1 ? ref : ref.slice(0, hashIdx);
+  const fragment = hashIdx === -1 ? '' : ref.slice(hashIdx);
+  const headId = stripVersionSuffix(id);
+  return '#/components/schemas/' + toPascalLocal(headId) + fragment;
+}
+
+function projectOAS(node, isTopLevel) {
+  if (Array.isArray(node)) return node.map(child => projectOAS(child, false));
+  if (node === null || typeof node !== 'object') return node;
+  const out = {};
+  for (const key of Object.keys(node)) {
+    const value = node[key];
+    if (isTopLevel && (key === '$id' || key === '$schema')) continue;
+    if (key === '$ref' && typeof value === 'string') {
+      out[key] = rewriteRef(value);
+      continue;
+    }
+    out[key] = projectOAS(value, false);
+  }
+  if (node.type === undefined && node.properties !== undefined) {
+    out.type = 'object';
+  }
+  return out;
+}
+
+// Component name: strip trailing `.vN` from the source $id stem so cross-
+// version siblings (`user.v1` / `user.v2`) collapse to the same component
+// key under OAS, with the file path carrying the version.
+const componentName = toPascalLocal(stripVersionSuffix(schemaId));
+const projected = projectOAS(schema, true);
+
+function indent(n) { return '  '.repeat(n); }
+
+function isScalar(v) {
+  return v === null || ['string','number','boolean'].includes(typeof v);
+}
+
+function yamlScalar(v) {
+  if (v === null) return 'null';
+  if (typeof v === 'boolean' || typeof v === 'number') return String(v);
+  const s = String(v);
+  // Quote any string that could be misread as another YAML type, contains
+  // a YAML-significant character, or has leading/trailing whitespace.
+  if (s === '' || /[:#&*!|>'"%@`,\[\]{}?\n\r\t]/.test(s) || /^\s|\s$/.test(s)
+    || /^(?:true|false|null|yes|no|on|off|~)$/i.test(s)
+    || /^-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?$/.test(s)) {
+    return "'" + s.replace(/'/g, "''") + "'";
+  }
+  return s;
+}
+
+function yamlValue(v, depth) {
+  if (v === undefined) return 'null';
+  if (isScalar(v)) return yamlScalar(v);
+  if (Array.isArray(v)) {
+    if (v.length === 0) return '[]';
+    return '\n' + v.map(item => {
+      if (isScalar(item)) return indent(depth) + '- ' + yamlScalar(item);
+      return indent(depth) + '- ' + yamlInline(item, depth + 1).replace(/^\n?/, '');
+    }).join('\n');
+  }
+  // object
+  const keys = Object.keys(v);
+  if (keys.length === 0) return '{}';
+  return '\n' + keys.map(k => {
+    const child = v[k];
+    if (isScalar(child)) return indent(depth) + yamlScalar(k) + ': ' + yamlScalar(child);
+    return indent(depth) + yamlScalar(k) + ':' + yamlValue(child, depth + 1);
+  }).join('\n');
+}
+
+// Same as yamlValue but always emits an inline `- ` array item's first
+// line; subsequent nested keys still go on their own indented lines.
+function yamlInline(v, depth) {
+  if (isScalar(v)) return yamlScalar(v);
+  if (Array.isArray(v)) return yamlValue(v, depth);
+  const keys = Object.keys(v);
+  if (keys.length === 0) return '{}';
+  return keys.map((k, i) => {
+    const child = v[k];
+    const prefix = i === 0 ? '' : indent(depth);
+    const sep = isScalar(child) ? ' ' : '';
+    return prefix + yamlScalar(k) + ':' + sep
+      + (isScalar(child) ? yamlScalar(child) : yamlValue(child, depth + 1));
+  }).join('\n');
+}
+-%>
+components:
+  schemas:
+    <%- componentName %>:<%- yamlValue(projected, 3) %>

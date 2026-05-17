@@ -23,6 +23,11 @@ async function buildApp(): Promise<Application> {
     .bind(ContractsEngineBindings.EMITTER_REGISTRY)
     .toClass(EmitterRegistry)
     .inScope(BindingScope.SINGLETON);
+  // Start the app so ManifestEmitterBooter discovers the built-in manifest
+  // emitters (cloudevents, openapi-components) shipped under
+  // `src/emitters/manifest/<kind>/`. Without `start()` the booter never
+  // fires and the registry only sees the TS-code emitters.
+  await app.start();
   return app;
 }
 

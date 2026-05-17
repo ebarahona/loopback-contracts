@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {ProtoEmitter} from '../../emitters/proto-emitter';
+import {ProtoEmitter} from '../../emitters/semantic/proto-emitter';
 import type {EmitterContext, JSONSchema} from '../../interfaces';
 
 const FIXTURE: JSONSchema = {

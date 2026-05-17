@@ -1,13 +1,13 @@
 import {BindingScope, injectable} from '@loopback/core';
-import {ContractsPeerDepMissingError, toKebab, toPascal} from '../helpers';
+import {ContractsPeerDepMissingError, toKebab, toPascal} from '../../helpers';
 import type {
   EmittedFile,
   EmitterContext,
   JSONSchema,
   ProjectionEmitter,
   SchemaRegistry,
-} from '../interfaces';
-import {ContractsBindings} from '../keys';
+} from '../../interfaces';
+import {ContractsBindings} from '../../keys';
 
 const PEER_DEP = 'json-schema-to-typescript';
 

@@ -71,6 +71,22 @@ function listManifestBindings(app: Application): string[] {
     .filter(k => k.startsWith('platform.contracts.emitters.manifest.'));
 }
 
+/**
+ * Subset of {@link listManifestBindings} that excludes built-in manifest
+ * emitters the booter discovers under `<plugin-dist>/emitters/manifest/`.
+ * These tests only assert about the fixture-authored project-local
+ * manifests; built-ins are covered by their own per-emitter specs.
+ */
+function listProjectManifestBindings(
+  app: Application,
+  fixtureKinds: readonly string[],
+): string[] {
+  const allowed = new Set(
+    fixtureKinds.map(k => `platform.contracts.emitters.manifest.${k}`),
+  );
+  return listManifestBindings(app).filter(k => allowed.has(k));
+}
+
 describe('ManifestEmitterBooter idempotency', () => {
   let root: string;
 
@@ -97,7 +113,7 @@ describe('ManifestEmitterBooter idempotency', () => {
     const {app, booter} = makeBooter(root);
     await booter.start();
     await booter.start();
-    const bindings = listManifestBindings(app);
+    const bindings = listProjectManifestBindings(app, ['fixture-one']);
     expect(bindings).toEqual([
       'platform.contracts.emitters.manifest.fixture-one',
     ]);
@@ -106,7 +122,7 @@ describe('ManifestEmitterBooter idempotency', () => {
   it('coalesces concurrent start() calls into a single bind pass', async () => {
     const {app, booter} = makeBooter(root);
     await Promise.all([booter.start(), booter.start(), booter.start()]);
-    const bindings = listManifestBindings(app);
+    const bindings = listProjectManifestBindings(app, ['fixture-one']);
     expect(bindings).toEqual([
       'platform.contracts.emitters.manifest.fixture-one',
     ]);
@@ -115,7 +131,7 @@ describe('ManifestEmitterBooter idempotency', () => {
   it('stop() unbinds every key the booter added and is itself idempotent', async () => {
     const {app, booter} = makeBooter(root);
     await booter.start();
-    expect(listManifestBindings(app)).toHaveLength(1);
+    expect(listProjectManifestBindings(app, ['fixture-one'])).toHaveLength(1);
     await booter.stop();
     expect(listManifestBindings(app)).toHaveLength(0);
     // Second stop is a no-op (idempotent) — does not throw.
@@ -128,7 +144,7 @@ describe('ManifestEmitterBooter idempotency', () => {
     await booter.start();
     await booter.stop();
     await booter.start();
-    const bindings = listManifestBindings(app);
+    const bindings = listProjectManifestBindings(app, ['fixture-one']);
     expect(bindings).toEqual([
       'platform.contracts.emitters.manifest.fixture-one',
     ]);
@@ -175,7 +191,7 @@ describe('ManifestEmitterBooter plural outputs[]', () => {
     const {app, booter} = makeBooter(root);
     await booter.start();
     await booter.start();
-    const bindings = listManifestBindings(app);
+    const bindings = listProjectManifestBindings(app, ['plural-fixture']);
     expect(bindings).toEqual([
       'platform.contracts.emitters.manifest.plural-fixture',
     ]);
@@ -184,7 +200,9 @@ describe('ManifestEmitterBooter plural outputs[]', () => {
   it('cleans up the plural-form binding on stop()', async () => {
     const {app, booter} = makeBooter(root);
     await booter.start();
-    expect(listManifestBindings(app)).toHaveLength(1);
+    expect(listProjectManifestBindings(app, ['plural-fixture'])).toHaveLength(
+      1,
+    );
     await booter.stop();
     expect(listManifestBindings(app)).toHaveLength(0);
   });

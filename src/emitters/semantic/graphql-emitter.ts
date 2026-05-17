@@ -1,15 +1,15 @@
 import {BindingScope, injectable} from '@loopback/core';
 import Ajv2020 from 'ajv/dist/2020';
 import {resolve} from 'node:path';
-import {ContractsValidationError, toKebab, toPascal} from '../helpers';
+import {ContractsValidationError, toKebab, toPascal} from '../../helpers';
 import type {
   EmittedFile,
   EmitterContext,
   JSONSchema,
   LossyReporter,
   ProjectionEmitter,
-} from '../interfaces';
-import {ContractsBindings} from '../keys';
+} from '../../interfaces';
+import {ContractsBindings} from '../../keys';
 
 /**
  * Per-schema options block the GraphQL emitter reads from `x-graphql` on the
@@ -32,7 +32,13 @@ interface FieldView {
   readonly description?: string;
 }
 
-const TEMPLATE_PATH = resolve(__dirname, '..', 'templates', 'graphql.ts.ejs');
+const TEMPLATE_PATH = resolve(
+  __dirname,
+  '..',
+  '..',
+  'templates',
+  'graphql.ts.ejs',
+);
 
 /**
  * Built-in GraphQL scalar names this emitter is allowed to project to.
