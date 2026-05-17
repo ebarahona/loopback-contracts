@@ -53,8 +53,8 @@ type DatasourcesFile =
  * stub (skipIfExists), produced once per entry in
  * `<projectRoot>/datasources.json`.
  *
- * Registered under {@link ContractsBindings.EMITTER_TAG} with `kind:
- * 'datasource'` so the engine discovers it through the same
+ * Registered under {@link ContractsBindings.EMITTER_TAG} with
+ * `kind: 'datasource'` so the engine discovers it through the same
  * `@extensions.list({tag: EMITTER_TAG})` path as every sidecar emitter.
  *
  * Unlike the model / repository / controller emitters, datasource output is
@@ -248,7 +248,7 @@ function renderString(s: string): string {
 /**
  * Convert a partial-substitution string like `"mongodb://${HOST}:${PORT}/db"`
  * into a template-literal expression:
- *   `` `mongodb://${process.env['HOST']}:${process.env['PORT']}/db` ``
+ *   `mongodb://${process.env['HOST']}:${process.env['PORT']}/db`
  *
  * Uses bracket-notation env access so the generated file stays
  * `noUncheckedIndexedAccess` compliant under the consumer's tsconfig.

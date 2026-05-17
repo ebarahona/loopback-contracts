@@ -331,8 +331,9 @@ async function bootstrap(
 // ---------------------------------------------------------------------------
 
 /**
- * Sidecar emitter kinds. Opt-in via `--emit-<kind>` (or `config.emit.<kind>:
- * true`); silent by default since most projects don't want every sidecar.
+ * Sidecar emitter kinds. Opt-in via `--emit-<kind>` (or
+ * `config.emit.<kind>: true`); silent by default since most projects don't
+ * want every sidecar.
  */
 const SIDECAR_EMITTER_KINDS = [
   'zod',

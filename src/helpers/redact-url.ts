@@ -3,7 +3,7 @@
  * unchanged if not parseable as a URL.
  *
  * Handles:
- * - Standard URLs: `https://user:pass@host/path` -> `https://[REDACTED]@host/path`
+ * - Standard URLs: `https://user:pass@host/path` -\> `https://[REDACTED]@host/path`
  * - Git+SSH: `git+ssh://git@host:owner/repo.git` (preserves `git@` since
  *   that's not a credential)
  * - Bare git URLs with credentials (best-effort regex fallback)

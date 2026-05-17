@@ -78,7 +78,7 @@ export function toSnake(s: string): string {
  *
  * Accepts a structural shape rather than the full {@link ModelConfigJson}
  * to keep the helpers layer free of upward imports from the public
- * {@link import('../types').ModelConfigJson} type.
+ * {@link ModelConfigJson} type.
  *
  * @internal
  */
@@ -94,7 +94,7 @@ export function resolveIdProperty(config: {
 
 /**
  * Reject obviously-unsafe relative paths before the engine hands them to
- * its {@link import('../interfaces').EmittedFile} pipeline.
+ * its {@link EmittedFile} pipeline.
  *
  * Generators build `EmittedFile.path` from schema-derived names; while
  * {@link splitWords} collapses `.` separators inside identifiers (so
@@ -107,7 +107,7 @@ export function resolveIdProperty(config: {
  * @param emitterKind - Label written into the thrown
  *   {@link ContractsCodegenError} so the engine's reporter can name the
  *   offending generator.
- * @throws {ContractsCodegenError} When the path escapes the project root.
+ * @throws `ContractsCodegenError` When the path escapes the project root.
  * @internal
  */
 export function assertNoTraversal(relPath: string, emitterKind: string): void {

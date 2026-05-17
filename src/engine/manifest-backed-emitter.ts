@@ -39,7 +39,7 @@ function getManifestAjv(): Ajv2020 {
 /**
  * Strip directory separators and the trailing `.schema.json` suffix from a
  * schema `$id` so manifest emitters land at a filename built from the bare
- * identifier (e.g. `'customer.v1'` -> `'customer.v1'`).
+ * identifier (e.g. `'customer.v1'` -\> `'customer.v1'`).
  */
 function baseName(id: string): string {
   const last = id.split(/[\\/]/).pop() ?? id;
@@ -49,7 +49,7 @@ function baseName(id: string): string {
 /**
  * Compute the derived per-schema synthetic identifier — the input to every
  * `{{...Name}}` placeholder. We use the dot-separated head of the schema
- * `$id` (e.g. `customer.v1` -> `customer`) so the casing helpers do not
+ * `$id` (e.g. `customer.v1` -\> `customer`) so the casing helpers do not
  * fold a version suffix into the rendered name. Manifest authors who want
  * the full id can still reach it through other template helpers if/when
  * they are added.

@@ -94,8 +94,8 @@ export interface ProjectionEmitter<TPerSchemaOptions = unknown> {
    *     with the first schema in topological order as context. Pick this
    *     when the emitter's output is a project-level resource (no
    *     `$contractId` linkage to any one schema) — e.g. the
-   *     `datasource` emitter, which iterates `<projectRoot>/datasources
-   *     .json` regardless of which schemas are loaded.
+   *     `datasource` emitter, which iterates
+   *     `<projectRoot>/datasources.json` regardless of which schemas are loaded.
    *
    * Omitting the field is equivalent to declaring `'per-schema'`; the
    * engine treats `undefined` and `'per-schema'` identically.

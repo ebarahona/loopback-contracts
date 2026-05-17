@@ -73,7 +73,7 @@ const EMPTY_PROJECT_SCHEMA: Readonly<JSONSchema> = Object.freeze({
  *
  * Execution order is deterministic:
  *
- * 1. Emitters are sorted by `tier` (`lb4-idiom` -> `real-translation` ->
+ * 1. Emitters are sorted by `tier` (`lb4-idiom` -\> `real-translation` -\>
  *    `convenience`), then by `kind` to break ties.
  * 2. Schemas are sorted topologically by their `$ref` edges. Cycles are
  *    permitted — when one is detected, every member is emitted once in the
@@ -318,7 +318,7 @@ function stampProducer(file: EmittedFile, kind: string): EmittedFile {
 /**
  * Topological sort over the `$ref` edge set, exported for unit-test access.
  *
- * Implements a three-state DFS (`unvisited` -> `onStack` -> `done`). When the
+ * Implements a three-state DFS (`unvisited` -\> `onStack` -\> `done`). When the
  * walk encounters a back-edge (target is currently `onStack`) we acknowledge
  * the cycle and continue without recursing — the LB4 lazy `() => Type`
  * convention is enforced by the GENERATED code, so the sort just needs to

@@ -182,7 +182,7 @@ export class Pipeline {
   private writeQueue: EmittedFile[] = [];
 
   /**
-   * Per-run map of `schema $id` -> the originating descriptor (the entry
+   * Per-run map of `schema $id` -\> the originating descriptor (the entry
    * from `loopback.config.json.schemas[]` that produced it). Populated in
    * stage 2 after the schema has been validated and its `$id` extracted,
    * and consumed in stage 6 so the diff iterates `N` schemas instead of
@@ -999,8 +999,8 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * Format an Ajv error array into a stable multi-line block. `allErrors:
- * true` collects every failure; one line per error keeps multi-failure
+ * Format an Ajv error array into a stable multi-line block.
+ * `allErrors: true` collects every failure; one line per error keeps multi-failure
  * output scannable. Each line has the form:
  *
  *   - <instancePath> <message> [keyword=<kw>]
@@ -1024,10 +1024,10 @@ function formatAjvErrors(errors: ErrorObject[] | null | undefined): string {
 
 /**
  * Pull a version pin out of a descriptor:
- *   - `git+…#v1.2.0` -> `v1.2.0`
- *   - `git+…?ref=sha` -> `sha`
- *   - `npm:pkg@1.2.0` -> `1.2.0`
- *   - bare path or unpinned URL -> `''`
+ *   - `git+…#v1.2.0` -\> `v1.2.0`
+ *   - `git+…?ref=sha` -\> `sha`
+ *   - `npm:pkg@1.2.0` -\> `1.2.0`
+ *   - bare path or unpinned URL -\> `''`
  */
 function extractPin(descriptor: string): string {
   const hash = descriptor.indexOf('#');

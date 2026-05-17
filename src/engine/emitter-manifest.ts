@@ -42,7 +42,7 @@ export interface EmitterManifestOutput {
    * `{{kind}}` interpolation against the active schema — see
    * {@link interpolatePath} for the grammar.
    *
-   * @example "models/{{kebabName}}.create.dto.ts"
+   * @example `"models/{{kebabName}}.create.dto.ts"`
    */
   readonly path: string;
   /** Write policy. Default `'regen'`. */

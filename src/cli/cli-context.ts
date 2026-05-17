@@ -95,8 +95,9 @@ export interface CliContextInit {
 /**
  * Type guard: narrow a {@link CliContext} to the with-config variant,
  * throwing `CONTRACTS_CLI_NO_PROJECT` when the context is the `init`
- * variant. Most callers should prefer `createCliContext({requireConfig:
- * true})` which returns the narrowed variant directly; this helper stays
+ * variant. Most callers should prefer
+ * `createCliContext({requireConfig: true})` which returns the narrowed
+ * variant directly; this helper stays
  * exported for edge cases (e.g., commands that branch on config presence
  * mid-flow).
  *

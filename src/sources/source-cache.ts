@@ -394,8 +394,8 @@ function isNodeErrnoException(err: unknown): err is NodeJS.ErrnoException {
 
 /**
  * Manual structural check for the {@link CacheManifest} shape. Verifies the
- * top-level `uri` is a string and `entries` is an array of `{path: string,
- * content: string}` objects. We deliberately avoid Ajv here — the cache
+ * top-level `uri` is a string and `entries` is an array of
+ * `{path: string, content: string}` objects. We deliberately avoid Ajv here — the cache
  * manifest is internal and the schema is two fields.
  */
 function isCacheManifestShape(value: unknown): value is CacheManifest {

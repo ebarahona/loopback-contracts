@@ -38,8 +38,8 @@ const ID_PROPERTY_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
  * (regenerated every run) and the matching `<name>.controller.ts` extension
  * stub (written once — `skipIfExists`).
  *
- * Registered under {@link ContractsBindings.EMITTER_TAG} with `kind:
- * 'controller'`; tier `'lb4-idiom'` — always-on, opt-OUT via
+ * Registered under {@link ContractsBindings.EMITTER_TAG} with
+ * `kind: 'controller'`; tier `'lb4-idiom'` — always-on, opt-OUT via
  * `--no-emit-controller`. The engine routes contracts that declare a
  * matching `configs/<name>.config.json` into `emit()`; contracts without
  * a config are skipped entirely (controllers are an LB4 surface and have
@@ -178,7 +178,7 @@ export class ControllerGenerator implements ProjectionEmitter {
 }
 
 /**
- * Extract the raw `$id` stem (e.g. `customer.v1` -> `customer`) so callers
+ * Extract the raw `$id` stem (e.g. `customer.v1` -\> `customer`) so callers
  * can derive both the PascalCase class name and the kebab-case file slug
  * from the same source. Falls back to a generic `model` placeholder when no
  * `$id` is present; upstream validation rejects that case before reaching
