@@ -87,7 +87,7 @@ export class AvroEmitter implements ProjectionEmitter<AvroPerSchemaOptions> {
   readonly tier = 'real-translation' as const;
   readonly description = 'Avro schema (for Kafka schema-registry workflows)';
   readonly peerDeps: string[] = [];
-  readonly perSchemaOptionsSchema: JSONSchema = {
+  readonly perSchemaOptionsSchema: JSONSchema = Object.freeze({
     type: 'object',
     properties: {
       namespace: {type: 'string'},
@@ -95,7 +95,7 @@ export class AvroEmitter implements ProjectionEmitter<AvroPerSchemaOptions> {
       aliases: {type: 'array', items: {type: 'string'}},
     },
     additionalProperties: false,
-  };
+  }) as JSONSchema;
 
   // Cached: Ajv compilation is the documented hot-path cost
   // (https://ajv.js.org/guide/managing-schemas.html). The emitter is a

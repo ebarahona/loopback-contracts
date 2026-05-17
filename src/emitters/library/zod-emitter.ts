@@ -60,10 +60,10 @@ export class ZodEmitter implements ProjectionEmitter {
   // re-typing the surrounding scaffolding. No `validateOptions` call here —
   // there is nothing to validate against an `additionalProperties: false`
   // schema when `options` is also empty.
-  readonly perSchemaOptionsSchema = {
+  readonly perSchemaOptionsSchema = Object.freeze({
     type: 'object',
     additionalProperties: false,
-  } as const;
+  } as const);
 
   emit(ctx: EmitterContext): EmittedFile[] {
     const schemaId = ctx.schema.$id ?? '<no-$id>';

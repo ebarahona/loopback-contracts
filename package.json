@@ -15,8 +15,9 @@
     "node": ">=20.19.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && npm run build:templates",
+    "build": "tsc -p tsconfig.build.json && npm run build:templates && npm run build:strip-cli-dts",
     "build:templates": "node scripts/copy-templates.mjs",
+    "build:strip-cli-dts": "node scripts/strip-cli-dts.mjs",
     "clean": "rimraf dist",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "eslint \"src/**/*.ts\"",

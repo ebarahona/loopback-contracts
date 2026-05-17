@@ -248,6 +248,15 @@ export class Pipeline {
    * elsewhere in stage 5 without going through this helper would
    * reintroduce the "schema with key … already exists" runtime error on
    * the second `run()` invocation in the same process.
+   *
+   * Implementation notes:
+   *   - `removeSchema(id)` is a no-op on cold start; Ajv silently ignores
+   *     an unknown `$id`, so the call is safe to make unconditionally
+   *     whenever an `$id` is present.
+   *   - When the meta-schema has NO `$id`, Ajv auto-assigns a unique
+   *     cache key on `compile()` and the second compile won't collide —
+   *     the early-return below skips the eviction in that case to make
+   *     the helper's intent (evict by stable `$id`) explicit.
    */
   private compileFresh(metaSchema: JSONSchema): ValidateFunction {
     const ajv = this.getAjv();

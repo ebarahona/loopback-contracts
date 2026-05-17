@@ -242,14 +242,14 @@ export class GraphQLEmitter implements ProjectionEmitter<GraphQLPerSchemaOptions
   // alternative path, add the dep here and resurrect the lazy `require`.
   readonly peerDeps: string[] = [];
   readonly templatePaths = [TEMPLATE_PATH];
-  readonly perSchemaOptionsSchema: JSONSchema = {
+  readonly perSchemaOptionsSchema: JSONSchema = Object.freeze({
     type: 'object',
     properties: {
       sdl: {type: 'boolean'},
       scalars: {type: 'object', additionalProperties: {type: 'string'}},
     },
     additionalProperties: false,
-  };
+  }) as JSONSchema;
 
   // Cached: Ajv compilation is the documented hot-path cost
   // (https://ajv.js.org/guide/managing-schemas.html). The emitter is a

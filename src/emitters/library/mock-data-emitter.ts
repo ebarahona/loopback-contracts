@@ -68,14 +68,14 @@ export class MockDataEmitter implements ProjectionEmitter<MockDataPerSchemaOptio
   readonly description =
     'Sample fixture (json-schema-faker, one valid example per schema)';
   readonly peerDeps: string[] = [PEER_DEP];
-  readonly perSchemaOptionsSchema: JSONSchema = {
+  readonly perSchemaOptionsSchema: JSONSchema = Object.freeze({
     type: 'object',
     properties: {
       seed: {type: 'integer'},
       count: {type: 'integer', default: 1},
     },
     additionalProperties: false,
-  };
+  }) as JSONSchema;
 
   // Cached: Ajv compilation is the documented hot-path cost
   // (https://ajv.js.org/guide/managing-schemas.html). The emitter is a

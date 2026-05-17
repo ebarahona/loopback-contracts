@@ -44,7 +44,17 @@ import {<%- Name %>Repository} from '../repositories/<%- h.kebab(ControllerName)
  */
 export class <%- ControllerName %>BaseController {
   constructor(
-    @repository(<%- Name %>Repository)
+    // Bind by the EXTENSION class name (`<%- ControllerName %>Repository`),
+    // not the base. LB4's repository booter auto-discovers files matching
+    // `<name>.repository.ts` (the user-editable extension) and binds them
+    // at `repositories.<%- ControllerName %>Repository`. The base file
+    // (`<name>.base.repository.ts`) is NEVER auto-bound, so a class-ref
+    // decorator like `@repository(<%- Name %>Repository)` would derive
+    // `repositories.<%- Name %>Repository` — a key that doesn't exist at
+    // runtime, silently bypassing every user override on the extension.
+    // The string-key form below resolves the extension; the type annotation
+    // stays on the base since the extension extends it.
+    @repository('<%- ControllerName %>Repository')
     public <%- repoVar %>: <%- Name %>Repository,
   ) {}
 <% if (isPublic) { %>

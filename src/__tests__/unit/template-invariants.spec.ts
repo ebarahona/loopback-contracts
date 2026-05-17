@@ -281,6 +281,7 @@ const REPOSITORY_VIEW = {
       targetClass: 'OrderBase',
       targetWithRelations: 'OrderBaseWithRelations',
       targetRepoClass: 'OrderBaseRepository',
+      targetRepoBindingName: 'OrderRepository',
       targetImportPath: '../models/order.base.model',
       targetRepoImportPath: './order.base.repository',
       getterName: 'ordersRepositoryGetter',
@@ -398,5 +399,52 @@ describe('datasource.base.ts.ejs', () => {
       rendered,
     ).filter(v => v.includes('is not a known export'));
     expect(violations).toEqual([]);
+  });
+});
+
+// --------------------------------------------------------------------------
+// Override-routing invariants — every DI decorator that resolves a
+// REPOSITORY binding must use the EXTENSION class NAME as a string, not the
+// base class reference. LB4's repository booter auto-discovers
+// `<name>.repository.ts` (the extension) and binds it at
+// `repositories.<ExtName>`; the base file is never auto-bound, so a
+// decorator referencing the base class would resolve a key that doesn't
+// exist and silently bypass every user override. These tests lock the
+// shape down so a future template edit can't regress us back into the bug.
+// --------------------------------------------------------------------------
+
+describe('override-routing decorators in generated base files', () => {
+  /** Strip `//` line comments so negative-match assertions don't trip on JSDoc that QUOTES the buggy form for context. */
+  function stripLineComments(src: string): string {
+    return src
+      .split('\n')
+      .filter(line => !line.trim().startsWith('//'))
+      .join('\n');
+  }
+
+  it('controller.base.ts.ejs: @repository(...) uses the extension class NAME as a string', () => {
+    const rendered = renderTemplate('controller.base.ts.ejs', CONTROLLER_VIEW);
+    const code = stripLineComments(rendered);
+    // Must bind by extension name (`CustomerRepository`) as a string,
+    // never by the base class reference.
+    expect(code).toContain("@repository('CustomerRepository')");
+    expect(code).not.toMatch(/@repository\(\s*CustomerBaseRepository/);
+  });
+
+  it('repository.base.ts.ejs: @repository.getter(...) uses extension class NAME for relation bindings', () => {
+    const rendered = renderTemplate('repository.base.ts.ejs', REPOSITORY_VIEW);
+    const code = stripLineComments(rendered);
+    // Relation getter must bind to `OrderRepository` (extension), not
+    // `OrderBaseRepository` (base).
+    expect(code).toContain("@repository.getter('OrderRepository')");
+    expect(code).not.toContain("@repository.getter('OrderBaseRepository')");
+  });
+
+  it('repository.base.ts.ejs: relation getter TYPE annotation still references the base class', () => {
+    // The type stays on the base — extension extends base, so the getter is
+    // structurally compatible at runtime, and the import works on the first
+    // `lb4 gen` run before any extension stub edits.
+    const rendered = renderTemplate('repository.base.ts.ejs', REPOSITORY_VIEW);
+    expect(rendered).toContain('Getter<OrderBaseRepository>');
   });
 });

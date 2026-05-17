@@ -35,7 +35,21 @@ interface RelationRepoView {
   factoryTypeImport: string;
   targetClass: string;
   targetWithRelations: string;
+  /**
+   * Base-repository class name used for the TYPE annotation only (e.g.
+   * `CustomerBaseRepository`). Imported from the always-regenerated base
+   * file so the type resolves on the first `lb4 gen` run.
+   */
   targetRepoClass: string;
+  /**
+   * Extension-repository class NAME used as the string binding key for
+   * `@repository.getter(...)` (e.g. `'CustomerRepository'`). LB4's
+   * repository booter auto-discovers `<name>.repository.ts` files and
+   * binds them at `repositories.<ExtName>` — the base file is never
+   * auto-bound, so binding by the base class name would resolve a key
+   * that doesn't exist and silently bypass every user override.
+   */
+  targetRepoBindingName: string;
   targetImportPath: string;
   targetRepoImportPath: string;
   getterName: string;
@@ -249,6 +263,7 @@ export class RepositoryGenerator implements ProjectionEmitter {
         targetClass: targetBaseClass,
         targetWithRelations: `${targetBaseClass}WithRelations`,
         targetRepoClass: `${targetClass}BaseRepository`,
+        targetRepoBindingName: `${targetClass}Repository`,
         targetImportPath,
         targetRepoImportPath,
         getterName: `${name}RepositoryGetter`,

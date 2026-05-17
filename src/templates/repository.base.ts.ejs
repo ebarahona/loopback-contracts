@@ -67,7 +67,14 @@ export class <%- className %>BaseRepository extends DefaultCrudRepository<
 <% }); -%>
   constructor(
     @inject('datasources.<%- dataSourceName %>') dataSource: <%- dataSourceClass %><% relations.forEach(function(r){ -%>,
-    @repository.getter('<%- r.targetRepoClass %>') <%- r.getterName %>: Getter<<%- r.targetRepoClass %>><% }); %>,
+    // `@repository.getter('<%- r.targetRepoBindingName %>')` binds by the
+    // EXTENSION class name so LB4's `repositories.<%- r.targetRepoBindingName %>`
+    // key (the one the booter auto-binds from `<name>.repository.ts`)
+    // resolves the user's override. Binding by the base class name would
+    // resolve a key that doesn't exist at runtime. Type annotation stays
+    // on the base class — the extension extends it, so the getter is
+    // structurally compatible.
+    @repository.getter('<%- r.targetRepoBindingName %>') <%- r.getterName %>: Getter<<%- r.targetRepoClass %>><% }); %>,
   ) {
     super(<%- baseClassName %>, dataSource);
 <% relations.forEach(function(r){ -%>

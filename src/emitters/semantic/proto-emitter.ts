@@ -69,7 +69,7 @@ export class ProtoEmitter implements ProjectionEmitter<ProtoPerSchemaOptions> {
   readonly description =
     'Protocol Buffers schema (for gRPC consumers in any language)';
   readonly peerDeps: string[] = [PEER_DEP];
-  readonly perSchemaOptionsSchema: JSONSchema = {
+  readonly perSchemaOptionsSchema: JSONSchema = Object.freeze({
     type: 'object',
     properties: {
       package: {type: 'string'},
@@ -77,7 +77,7 @@ export class ProtoEmitter implements ProjectionEmitter<ProtoPerSchemaOptions> {
       goPackage: {type: 'string'},
     },
     additionalProperties: false,
-  };
+  }) as JSONSchema;
 
   // Cached: Ajv compilation is the documented hot-path cost
   // (https://ajv.js.org/guide/managing-schemas.html). The emitter is a

@@ -59,14 +59,14 @@ export class AsyncAPIEmitter implements ProjectionEmitter<AsyncAPIPerSchemaOptio
     'AsyncAPI 3.0 message catalog fragment (event-driven endpoints)';
   readonly peerDeps: string[] = [];
   readonly templatePaths = [TEMPLATE_PATH];
-  readonly perSchemaOptionsSchema: JSONSchema = {
+  readonly perSchemaOptionsSchema: JSONSchema = Object.freeze({
     type: 'object',
     properties: {
       channelName: {type: 'string'},
       operationKind: {enum: ['send', 'receive']},
     },
     additionalProperties: false,
-  };
+  }) as JSONSchema;
 
   // Cached: Ajv compilation is the documented hot-path cost
   // (https://ajv.js.org/guide/managing-schemas.html). The emitter is a

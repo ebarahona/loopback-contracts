@@ -41,10 +41,10 @@ export class TypesEmitter implements ProjectionEmitter {
   // contributor a single place to add fields. No `validateOptions` call is
   // needed — there's nothing to validate against an empty closed object
   // when `options` is also empty.
-  readonly perSchemaOptionsSchema = {
+  readonly perSchemaOptionsSchema = Object.freeze({
     type: 'object',
     additionalProperties: false,
-  } as const;
+  } as const);
 
   async emit(ctx: EmitterContext): Promise<EmittedFile[]> {
     const schemaId = ctx.schema.$id ?? '<no-$id>';
