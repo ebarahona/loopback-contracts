@@ -255,8 +255,9 @@ export class Pipeline {
    *     whenever an `$id` is present.
    *   - When the meta-schema has NO `$id`, Ajv auto-assigns a unique
    *     cache key on `compile()` and the second compile won't collide —
-   *     the early-return below skips the eviction in that case to make
-   *     the helper's intent (evict by stable `$id`) explicit.
+   *     the `if (typeof id === 'string')` guard below skips the eviction
+   *     in that case to make the helper's intent (evict by stable `$id`)
+   *     explicit.
    */
   private compileFresh(metaSchema: JSONSchema): ValidateFunction {
     const ajv = this.getAjv();
@@ -684,12 +685,12 @@ export class Pipeline {
       }
 
       // Validate inline `config-bindings` entries in `loopback.config.json`.
-      // `LoopbackConfigJson['config-bindings']` is now typed as
-      // `readonly ModelConfigJson[]`, so `entry` is `ModelConfigJson` at
-      // destructure time — no `as unknown as ModelConfigJson` double-cast
-      // needed. Ajv's `ValidateFunction` type-guard narrows `entry` to
-      // `unknown` inside the success branch, so a single `as ModelConfigJson`
-      // re-asserts the declared array element type.
+      // `LoopbackConfigJson['config-bindings']` is typed as
+      // `readonly ModelConfigJson[]`, so `entry` is already `ModelConfigJson`
+      // at destructure time — no `as unknown as ModelConfigJson` double-cast
+      // needed. The single `as ModelConfigJson` below re-asserts the array
+      // element type already declared on the field; Ajv's `validate(entry)`
+      // guarantees the runtime shape matches before the registry add.
       const inline = opts.config['config-bindings'];
       if (Array.isArray(inline)) {
         const inlineConfigPath = join(opts.projectRoot, 'loopback.config.json');

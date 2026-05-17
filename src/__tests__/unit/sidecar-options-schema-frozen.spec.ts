@@ -55,17 +55,23 @@ describe('sidecar emitter perSchemaOptionsSchema invariant', () => {
     });
   }
 
-  it('returns the SAME reference across constructions (no per-instance copy)', () => {
-    // If a contributor accidentally swaps the `readonly` field for a getter
-    // that returns a fresh literal each access, this would fail — the Ajv
-    // cache keyed on the previous reference would never be hit again.
+  it('property access returns a stable reference (not a fresh-object getter)', () => {
+    // Scope of this test: it pins INTRA-instance stability — the
+    // `perSchemaOptionsSchema` slot must be a plain field (or readonly
+    // accessor that returns the same reference), NOT a getter that
+    // computes a fresh object on every access. If a future contributor
+    // swaps the class-field initialiser for `get perSchemaOptionsSchema()
+    // { return {...this._schema}; }`, the two reads below would land
+    // different objects and the strict-equality check fails — which
+    // matters because the Ajv validator cache is keyed on the reference
+    // returned by the FIRST read.
+    //
+    // It does NOT pin cross-instance reference equality: the schema
+    // literal is a class-field initialiser, so the surrounding
+    // `Object.freeze({...})` evaluates fresh per `new` call. `a.x === b.x`
+    // is INTENTIONALLY not asserted. Cross-instance immutability is
+    // already pinned by the for-loop above (`Object.isFrozen(b.x)`).
     const a = new MockDataEmitter();
-    const b = new MockDataEmitter();
     expect(a.perSchemaOptionsSchema).toBe(a.perSchemaOptionsSchema);
-    // Cross-instance identity is intentional: the schema literal is a
-    // class-field initialiser, which the TS compiler emits once per
-    // instance — but the OUTER `Object.freeze({...})` evaluates fresh per
-    // instance, so we only assert intra-instance stability here.
-    expect(Object.isFrozen(b.perSchemaOptionsSchema)).toBe(true);
   });
 });

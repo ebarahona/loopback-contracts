@@ -158,9 +158,19 @@ export class ManifestBackedEmitter implements ProjectionEmitter {
       this.peerDeps = manifest.peerDeps.slice();
     }
     if (manifest.perSchemaOptionsSchema !== undefined) {
-      this.perSchemaOptionsSchema = manifest.perSchemaOptionsSchema;
+      // Shallow-freeze a STRUCTURAL COPY of the manifest's per-schema
+      // options schema. Matches the contract every first-party sidecar
+      // emitter honours (see sidecar-options-schema-frozen.spec.ts): the
+      // engine's options-validator cache compiles once at construction
+      // and relies on the schema literal being immutable thereafter. A
+      // manifest author who kept a reference to the parsed JSON and
+      // mutated it post-construction would otherwise feed a stale
+      // validator on subsequent runs.
+      this.perSchemaOptionsSchema = Object.freeze({
+        ...manifest.perSchemaOptionsSchema,
+      });
       this.compiledOptionsValidator = getManifestAjv().compile(
-        manifest.perSchemaOptionsSchema as object,
+        this.perSchemaOptionsSchema as object,
       );
     }
 
