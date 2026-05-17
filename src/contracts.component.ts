@@ -18,6 +18,7 @@ import {
   EmitterRunner,
   FileWriter,
   InMemoryLossyReporter,
+  InMemoryConfigRegistry,
   InMemorySchemaRegistry,
   ManifestEmitterBooter,
   Pipeline,
@@ -47,9 +48,10 @@ import {
  * `app.component(ContractsComponent)`. The component wires up every built-in
  * emitter, every built-in schema source, the DI-safe engine singletons
  * (lossy reporter, schema registry, file writer, emitter registry/runner,
- * source-resolver registry, pipeline, manifest-emitter booter), and the
- * engine-internal generators (model, repo, controller, datasource, barrel,
- * meta-schema writer).
+ * source-resolver registry, pipeline, manifest-emitter booter), the
+ * LB4-idiom emitters (model/repository/controller/datasource, tagged
+ * under `EMITTER_TAG` with `tier: 'lb4-idiom'`), and the engine-internal
+ * generators (barrel, meta-schema writer).
  *
  * Emitters and sources are discovered through their `@injectable` tag
  * metadata — `createBindingFromClass` lifts the `EMITTER_TAG` / `SOURCE_TAG`
@@ -121,6 +123,9 @@ export class ContractsComponent implements Component {
     Binding.bind(ContractsBindings.SCHEMA_REGISTRY)
       .toClass(InMemorySchemaRegistry)
       .inScope(BindingScope.SINGLETON),
+    Binding.bind(ContractsBindings.CONFIG_REGISTRY)
+      .toClass(InMemoryConfigRegistry)
+      .inScope(BindingScope.SINGLETON),
     Binding.bind(ContractsEngineBindings.SOURCE_RESOLVER_REGISTRY)
       .toClass(SourceResolverRegistry)
       .inScope(BindingScope.SINGLETON),
@@ -148,13 +153,26 @@ export class ContractsComponent implements Component {
     createBindingFromClass(ManifestEmitterBooter),
 
     // -------------------------------------------------------------------
-    // Core generators — engine-internal, not contributed under
-    // `EMITTER_TAG`. The pipeline injects them class-as-key.
+    // LB4-idiom emitters (model, repo, controller, datasource). Same
+    // `EMITTER_TAG` discovery channel as sidecars — `createBindingFromClass`
+    // lifts the `@injectable({tags: {[EMITTER_TAG]: ..., kind: ...}})`
+    // metadata onto the binding. The engine cannot tell sidecar emitters
+    // and lb4-idiom emitters apart at the registry level; the `tier` field
+    // on each emitter is what drives CLI defaults (sidecars = opt-in;
+    // lb4-idiom = opt-out via `--no-emit-<kind>`).
+    //
+    // `override.ts` continues to inject them class-as-key through the
+    // deprecated `generate()` back-compat shim each generator preserves.
     // -------------------------------------------------------------------
     createBindingFromClass(ModelGenerator),
     createBindingFromClass(RepositoryGenerator),
     createBindingFromClass(ControllerGenerator),
     createBindingFromClass(DatasourceGenerator),
+
+    // -------------------------------------------------------------------
+    // Engine-internal generators — not emitter contributions. Injected
+    // class-as-key by the pipeline / writer pass.
+    // -------------------------------------------------------------------
     createBindingFromClass(BarrelGenerator),
     createBindingFromClass(MetaSchemaWriter),
   ];

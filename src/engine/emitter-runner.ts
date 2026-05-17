@@ -6,6 +6,7 @@ import {ContractsCodegenError, ContractsPeerDepMissingError} from '../helpers';
 // callable on `traverse` directly.
 import traverse from 'json-schema-traverse';
 import type {
+  ConfigRegistry,
   EmittedFile,
   EmitterContext,
   ImportMap,
@@ -83,6 +84,8 @@ export class EmitterRunner {
     private readonly paths: ProjectPaths,
     @inject(ContractsBindings.LOSSY_REPORTER)
     private readonly reporter: LossyReporter,
+    @inject(ContractsBindings.CONFIG_REGISTRY, {optional: true})
+    private readonly configs?: ConfigRegistry,
   ) {}
 
   /**
@@ -175,6 +178,7 @@ export class EmitterRunner {
       templates: this.templates,
       paths: this.paths,
       lossy: this.reporter,
+      ...(this.configs !== undefined ? {configs: this.configs} : {}),
     };
     return options === undefined ? ctx : {...ctx, options};
   }

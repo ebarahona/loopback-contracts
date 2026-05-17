@@ -86,6 +86,55 @@ export interface EmitterContext<TPerSchemaOptions = unknown> {
    * `severity: 'warn'` to an error.
    */
   readonly lossy: LossyReporter;
+
+  /**
+   * Per-contract LB4 metadata loaded from `configs/*.config.json` files,
+   * keyed by the contract's `$id`. Schemas under `schemas/` stay pure
+   * JSON Schema (portable, language-agnostic); LB4-isms like `dataSource`
+   * bindings, relations, ACLs, and `idProperty` live in the sibling
+   * config files this registry surfaces.
+   *
+   * Optional because most sidecar emitters (zod, types, graphql, etc.)
+   * have no business reading LB4 config — it would tightly couple them
+   * to LB4 conventions. Consumed primarily by lb4-idiom-tier emitters
+   * (model, repository, controller, datasource), which use it to project
+   * the LB4-specific output (`@model()` settings, `@hasMany()` decorators,
+   * datasource bindings, etc.).
+   */
+  readonly configs?: ConfigRegistry;
+}
+
+/**
+ * Read-only view of every per-contract LB4 config the engine has loaded.
+ *
+ * Configs come from `configs/*.config.json` files validated against the
+ * engine-generated `_meta/model-config.schema.json` at pipeline stage 5.
+ * The registry surfaces them keyed by `$contractId` (which matches the
+ * referenced schema's `$id`).
+ *
+ * Marked optional on {@link EmitterContext.configs} so emitters that don't
+ * touch LB4 config (most sidecar emitters) don't need to care it exists.
+ *
+ * @public
+ */
+export interface ConfigRegistry {
+  /**
+   * Look up the LB4 config for a given contract by its `$contractId`.
+   *
+   * @param contractId - The contract's `$id` (mirrored in the config's
+   *   `$contractId` field).
+   * @returns The parsed config object, or `undefined` when no config
+   *   file declared `$contractId` matching `contractId`. `unknown` already
+   *   subsumes `undefined`; the JSDoc spells it out for emitter authors
+   *   even though the type system folds it into the single `unknown`.
+   */
+  readonly get: (contractId: string) => unknown;
+
+  /** Live snapshot of every loaded config. */
+  readonly list: () => readonly unknown[];
+
+  /** Membership check by `$contractId`. */
+  readonly has: (contractId: string) => boolean;
 }
 
 /**

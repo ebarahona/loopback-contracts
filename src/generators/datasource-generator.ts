@@ -1,11 +1,19 @@
 import {BindingScope, injectable} from '@loopback/core';
+import {readFileSync} from 'node:fs';
 import {join, posix} from 'node:path';
 import {assertNoTraversal, toKebab} from '../helpers';
-import type {EmittedFile} from '../interfaces';
+import type {
+  EmittedFile,
+  EmitterContext,
+  ProjectionEmitter,
+} from '../interfaces';
+import {ContractsBindings} from '../keys';
 import type {DatasourceConfigJson} from '../types';
 import type {GeneratorContext} from './types';
 
 const TEMPLATES_DIR = join(__dirname, '..', 'templates');
+const TPL_BASE = join(TEMPLATES_DIR, 'datasource.base.ts.ejs');
+const TPL_EXT = join(TEMPLATES_DIR, 'datasource.ts.ejs');
 const PRODUCER = 'datasource-generator';
 
 /**
@@ -24,9 +32,41 @@ const ENV_PLACEHOLDER = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
 const ENV_INTERIOR = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/;
 
 /**
- * Engine-internal generator for `src/datasources/<name>.base.datasource.ts`
- * (regenerated every run) and, when `ctx.includeExtension` is `true`, the
- * matching `<name>.datasource.ts` extension stub (written once).
+ * Shape of `<projectRoot>/datasources.json`. Two layouts are accepted, in
+ * lock-step with `findDatasourceEntry()` in `src/cli/commands/override.ts`:
+ *
+ *   - Keyed map: `{"primary": {"adapter": "mongodb", ...}}` (preferred;
+ *     `lb4 ds` writes this form). The optional `$schema` string key is
+ *     allowed; the emitter skips it.
+ *   - Legacy array: `[{"name": "primary", "adapter": "mongodb", ...}]`.
+ *     Tolerated for fixtures and pre-existing projects that haven't yet
+ *     migrated; entries are normalised to the keyed-map form before
+ *     rendering.
+ */
+type DatasourcesFile =
+  | Record<string, DatasourceConfigJson | string>
+  | readonly DatasourceConfigJson[];
+
+/**
+ * LB4-idiom projection emitter for `src/datasources/<name>.base.datasource.ts`
+ * (regenerated every run) and the sibling `<name>.datasource.ts` extension
+ * stub (skipIfExists), produced once per entry in
+ * `<projectRoot>/datasources.json`.
+ *
+ * Registered under {@link ContractsBindings.EMITTER_TAG} with `kind:
+ * 'datasource'` so the engine discovers it through the same
+ * `@extensions.list({tag: EMITTER_TAG})` path as every sidecar emitter.
+ *
+ * Unlike the model / repository / controller emitters, datasource output is
+ * project-level, not per-schema — `datasources.json` is keyed by datasource
+ * name and carries no `$id`/`$contractId` linkage. The runner still calls
+ * {@link emit} once per `(schema, emitter)` pair, so this emitter re-reads
+ * `datasources.json` on every invocation and re-emits the same descriptor
+ * set. FileWriter's content-hash idempotency dedupes the writes, so the net
+ * effect is the same files written once per `lb4 gen` run; the cost is some
+ * redundant in-memory work that stays measurable only past hundreds of
+ * schemas, at which point we revisit (e.g. via a per-run cache or a
+ * dedicated project-level emitter category).
  *
  * Environment-variable interpolation: any string value of the form
  * `"${VAR}"` is rewritten into a `process.env.VAR` reference in the emitted
@@ -36,8 +76,88 @@ const ENV_INTERIOR = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/;
  *
  * @internal
  */
-@injectable({scope: BindingScope.SINGLETON})
-export class DatasourceGenerator {
+@injectable({
+  scope: BindingScope.SINGLETON,
+  tags: {
+    [ContractsBindings.EMITTER_TAG]: ContractsBindings.EMITTER_TAG,
+    kind: 'datasource',
+  },
+})
+export class DatasourceGenerator implements ProjectionEmitter {
+  readonly kind = 'datasource';
+  readonly tier = 'lb4-idiom' as const;
+  readonly outputSuffix = '.base.datasource.ts';
+  readonly description =
+    'LB4 juggler datasource — regen-always base + skipIfExists extension stub (one per entry in datasources.json)';
+  readonly peerDeps: string[] = [];
+  readonly templatePaths: readonly string[] = [TPL_BASE, TPL_EXT];
+
+  /**
+   * Engine entry point. Datasources are project-level, not per-schema: we
+   * load `<projectRoot>/datasources.json` synchronously on every `emit()`
+   * call and iterate every entry, returning the full descriptor set.
+   *
+   * FileWriter dedupes by content hash, so the redundant work the runner's
+   * per-schema dispatch produces (5 schemas → this emit runs 5 times) is
+   * O(redundant in-memory render) and zero filesystem writes after the
+   * first pass — correctness is guaranteed.
+   *
+   * Missing `datasources.json` is not an error: a contracts-only project
+   * legitimately ships no datasources. We swallow the read failure and
+   * return `[]`.
+   */
+  emit(ctx: EmitterContext): EmittedFile[] {
+    const datasourcesPath = join(ctx.paths.root, 'datasources.json');
+    let datasources: DatasourcesFile;
+    try {
+      const raw = readFileSync(datasourcesPath, 'utf8');
+      datasources = JSON.parse(raw) as DatasourcesFile;
+    } catch {
+      // No `datasources.json` (or unreadable) — project has no datasources
+      // to emit. Treat as a benign empty set; the engine will simply skip
+      // writing datasource files this run.
+      return [];
+    }
+
+    const genCtx: GeneratorContext = {
+      registry: ctx.registry,
+      importMap: ctx.importMap,
+      templates: ctx.templates,
+      paths: ctx.paths,
+      lossy: ctx.lossy,
+      // Always emit the extension stub; FileWriter's `skipIfExists` policy
+      // preserves any hand edits across subsequent regenerations.
+      includeExtension: true,
+    };
+
+    const entries = normaliseDatasources(datasources);
+    const out: EmittedFile[] = [];
+    for (const [name, dsConfig] of entries) {
+      out.push(...this.generateInternal(name, dsConfig, genCtx));
+    }
+    return out;
+  }
+
+  /**
+   * Back-compat shim used by `lb4 override datasource <name>`, which boots
+   * a transient application and invokes the generator directly with a
+   * caller-supplied entry — bypassing `datasources.json` lookup. New code
+   * should reach the generator through the {@link ProjectionEmitter} path
+   * (i.e. `lb4 gen`) instead; this entry point exists only for the
+   * override command's direct-invocation bootstrap.
+   *
+   * @deprecated Use the ProjectionEmitter path (`lb4 gen`) instead; this
+   *   method is kept for backward compat with the override command's
+   *   direct-invocation bootstrap.
+   */
+  generate(
+    name: string,
+    dsConfig: DatasourceConfigJson,
+    ctx: GeneratorContext,
+  ): EmittedFile[] {
+    return this.generateInternal(name, dsConfig, ctx);
+  }
+
   /**
    * Build the descriptors the engine writes for one datasource entry.
    *
@@ -45,7 +165,7 @@ export class DatasourceGenerator {
    * @param dsConfig - Parsed `datasources.json` entry for this datasource.
    * @param ctx - Per-run generator context.
    */
-  generate(
+  private generateInternal(
     name: string,
     dsConfig: DatasourceConfigJson,
     ctx: GeneratorContext,
@@ -61,10 +181,10 @@ export class DatasourceGenerator {
       connector: dsConfig.adapter,
     });
 
-    const baseContent = ctx.templates.render(
-      join(TEMPLATES_DIR, 'datasource.base.ts.ejs'),
-      {name, configLiteral: literal},
-    );
+    const baseContent = ctx.templates.render(TPL_BASE, {
+      name,
+      configLiteral: literal,
+    });
 
     const basePath = posix.join('datasources', `${kebab}.base.datasource.ts`);
     assertNoTraversal(basePath, PRODUCER);
@@ -78,10 +198,7 @@ export class DatasourceGenerator {
     ];
 
     if (ctx.includeExtension) {
-      const extContent = ctx.templates.render(
-        join(TEMPLATES_DIR, 'datasource.ts.ejs'),
-        {name},
-      );
+      const extContent = ctx.templates.render(TPL_EXT, {name});
       const extPath = posix.join('datasources', `${kebab}.datasource.ts`);
       assertNoTraversal(extPath, PRODUCER);
       files.push({
@@ -181,4 +298,32 @@ function renderObject(obj: Record<string, unknown>, indent: number): string {
 
 function isSafeKey(k: string): boolean {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k);
+}
+
+/**
+ * Normalise the two accepted `datasources.json` layouts into a uniform
+ * `[name, config]` tuple list. Mirrors `findDatasourceEntry()`'s tolerance
+ * in `src/cli/commands/override.ts`. Silently drops entries that can't be
+ * parsed (string values like `$schema`, malformed array members, anonymous
+ * entries) — they belong to the validator's domain, not codegen's.
+ */
+function normaliseDatasources(
+  datasources: DatasourcesFile,
+): readonly [string, DatasourceConfigJson][] {
+  const out: [string, DatasourceConfigJson][] = [];
+  if (Array.isArray(datasources)) {
+    for (const entry of datasources) {
+      if (entry === null || typeof entry !== 'object') continue;
+      const name = (entry as {name?: unknown}).name;
+      if (typeof name !== 'string' || name.length === 0) continue;
+      out.push([name, entry]);
+    }
+    return out;
+  }
+  for (const [name, dsConfig] of Object.entries(datasources)) {
+    if (name === '$schema') continue;
+    if (typeof dsConfig === 'string') continue;
+    out.push([name, dsConfig]);
+  }
+  return out;
 }

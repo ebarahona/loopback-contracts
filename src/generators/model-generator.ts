@@ -8,7 +8,13 @@ import {
   toKebab,
   toPascal,
 } from '../helpers';
-import type {EmittedFile, JSONSchema} from '../interfaces';
+import type {
+  EmittedFile,
+  EmitterContext,
+  JSONSchema,
+  ProjectionEmitter,
+} from '../interfaces';
+import {ContractsBindings} from '../keys';
 import type {ModelConfigJson, ModelRelationConfig} from '../types';
 import {buildRefResolver, jsonSchemaToTsType} from './json-schema-to-ts-type';
 import type {GeneratorContext} from './types';
@@ -48,18 +54,86 @@ interface ImportView {
 }
 
 /**
- * Engine-internal generator for `src/models/<name>.base.model.ts` (regen) and
- * the optional `src/models/<name>.model.ts` extension stub (skipIfExists).
+ * LB4-idiom projection emitter for `src/models/<name>.base.model.ts` (regen)
+ * and the sibling `src/models/<name>.model.ts` extension stub (skipIfExists).
  *
- * Always runs — not registered under `EMITTER_TAG`. Consumes the schema +
- * model-config and renders via the injected {@link GeneratorContext.templates}
- * engine.
+ * Registered under {@link ContractsBindings.EMITTER_TAG} with `kind: 'model'`
+ * so the engine discovers it through the same
+ * `@extensions.list({tag: EMITTER_TAG})` path as every sidecar emitter.
+ * Always runs at the `lb4-idiom` tier; users opt OUT through
+ * `--no-emit-model` (or by deleting the corresponding `configs/*.config.json`,
+ * which causes {@link emit} to return an empty descriptor list — see the
+ * skip-if-no-config branch below).
  *
  * @internal
  */
-@injectable({scope: BindingScope.SINGLETON})
-export class ModelGenerator {
+@injectable({
+  scope: BindingScope.SINGLETON,
+  tags: {
+    [ContractsBindings.EMITTER_TAG]: ContractsBindings.EMITTER_TAG,
+    kind: 'model',
+  },
+})
+export class ModelGenerator implements ProjectionEmitter {
+  readonly kind = 'model';
+  readonly tier = 'lb4-idiom' as const;
+  readonly outputSuffix = '.base.model.ts';
+  readonly description =
+    'LB4 @model() class — regen-always base + skipIfExists extension stub';
+  readonly peerDeps: string[] = [];
+  readonly templatePaths: readonly string[] = [TPL_BASE, TPL_EXT];
+
+  /**
+   * Engine entry point. Looks up the per-contract LB4 config via
+   * {@link EmitterContext.configs}; returns `[]` when no config is registered
+   * for `ctx.schema.$id` so sidecar-only projects that accidentally enable
+   * `--emit-model` don't fail the run. The extension stub is always emitted
+   * alongside the base file — the FileWriter's `skipIfExists` policy
+   * preserves any hand edits across subsequent regenerations.
+   */
+  emit(ctx: EmitterContext): EmittedFile[] {
+    const schemaId = ctx.schema.$id;
+    if (typeof schemaId !== 'string') return [];
+    const config = ctx.configs?.get(schemaId) as ModelConfigJson | undefined;
+    if (config === undefined) return [];
+
+    const genCtx: GeneratorContext = {
+      registry: ctx.registry,
+      importMap: ctx.importMap,
+      templates: ctx.templates,
+      paths: ctx.paths,
+      lossy: ctx.lossy,
+      // Always emit the extension stub; FileWriter's `skipIfExists` policy
+      // means the file is written once on first run and never overwritten,
+      // so every `lb4 gen` is safe to declare it.
+      includeExtension: true,
+    };
+
+    return this.generateInternal(ctx.schema, config, genCtx);
+  }
+
+  /**
+   * Back-compat shim used by `lb4 override <kind> <contract>`, which boots
+   * a transient application and invokes the generator directly with a
+   * caller-supplied config — bypassing the engine's
+   * {@link EmitterContext.configs} registry. New code should reach the
+   * generator through the {@link ProjectionEmitter} path (i.e. `lb4 gen`)
+   * instead; this entry point exists only for the override command's
+   * direct-invocation bootstrap.
+   *
+   * @deprecated Use the ProjectionEmitter path (`lb4 gen`) instead; this
+   *   method is kept for backward compat with the override command's
+   *   direct-invocation bootstrap.
+   */
   generate(
+    schema: JSONSchema,
+    config: ModelConfigJson,
+    ctx: GeneratorContext,
+  ): EmittedFile[] {
+    return this.generateInternal(schema, config, ctx);
+  }
+
+  private generateInternal(
     schema: JSONSchema,
     config: ModelConfigJson,
     ctx: GeneratorContext,

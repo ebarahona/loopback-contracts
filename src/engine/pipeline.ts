@@ -30,6 +30,7 @@ import type {
 import {EmitterRegistry} from './emitter-registry';
 import {EmitterRunner} from './emitter-runner';
 import {FileWriter} from './file-writer';
+import {InMemoryConfigRegistry} from './config-registry';
 import {InMemoryLossyReporter} from './lossy-reporter';
 import {ModuleFormatTransformer} from './module-format-transformer';
 import {
@@ -167,6 +168,8 @@ export class Pipeline {
     private readonly paths: ProjectPaths,
     @inject(ContractsBindings.LOSSY_REPORTER)
     private readonly lossy: InMemoryLossyReporter,
+    @inject(ContractsBindings.CONFIG_REGISTRY)
+    private readonly configs: InMemoryConfigRegistry,
   ) {}
 
   /**
@@ -247,6 +250,7 @@ export class Pipeline {
     let stagesRun = 0;
     this.registry.clear();
     this.lossy.clear();
+    this.configs.clear();
     this.writeQueue = [];
     this.schemaOrigins.clear();
     const maxStage: StageNumber = opts.maxStage ?? 8;
@@ -641,6 +645,12 @@ export class Pipeline {
             ...(contractId !== undefined ? {schemaId: contractId} : {}),
           },
         );
+      }
+      // Validation passed — load into the per-contract config registry so
+      // lb4-idiom-tier emitters (model/repository/controller/datasource)
+      // can look up their LB4 metadata by `$contractId` at emit time.
+      if (isPlainObject(json)) {
+        this.configs.add(json as unknown as ModelConfigJson);
       }
     }
 

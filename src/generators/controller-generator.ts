@@ -7,11 +7,19 @@ import {
   toKebab,
   toPascal,
 } from '../helpers';
-import type {EmittedFile, JSONSchema} from '../interfaces';
+import type {
+  EmittedFile,
+  EmitterContext,
+  JSONSchema,
+  ProjectionEmitter,
+} from '../interfaces';
+import {ContractsBindings} from '../keys';
 import type {ModelConfigJson} from '../types';
 import type {GeneratorContext} from './types';
 
 const TEMPLATES_DIR = join(__dirname, '..', 'templates');
+const TPL_BASE = join(TEMPLATES_DIR, 'controller.base.ts.ejs');
+const TPL_EXT = join(TEMPLATES_DIR, 'controller.ts.ejs');
 const PRODUCER = 'controller-generator';
 
 /**
@@ -26,12 +34,16 @@ const PRODUCER = 'controller-generator';
 const ID_PROPERTY_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
 /**
- * Engine-internal generator for `src/controllers/<name>.base.controller.ts`
- * (regenerated every run) and, when `ctx.includeExtension` is `true`, the
- * matching `<name>.controller.ts` extension stub (written once).
+ * Projection emitter for `src/controllers/<name>.base.controller.ts`
+ * (regenerated every run) and the matching `<name>.controller.ts` extension
+ * stub (written once — `skipIfExists`).
  *
- * Not registered under `EMITTER_TAG` — controllers are an LB4-idiom core
- * projection emitted directly by the engine, not a contributed sidecar.
+ * Registered under {@link ContractsBindings.EMITTER_TAG} with `kind:
+ * 'controller'`; tier `'lb4-idiom'` — always-on, opt-OUT via
+ * `--no-emit-controller`. The engine routes contracts that declare a
+ * matching `configs/<name>.config.json` into `emit()`; contracts without
+ * a config are skipped entirely (controllers are an LB4 surface and have
+ * no meaning without an LB4 config).
  *
  * When `config.public === false` the base class is still emitted, but with an
  * empty body: the model is repository-only and intentionally exposes no
@@ -40,17 +52,77 @@ const ID_PROPERTY_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
  *
  * @internal
  */
-@injectable({scope: BindingScope.SINGLETON})
-export class ControllerGenerator {
+@injectable({
+  scope: BindingScope.SINGLETON,
+  tags: {
+    [ContractsBindings.EMITTER_TAG]: ContractsBindings.EMITTER_TAG,
+    kind: 'controller',
+  },
+})
+export class ControllerGenerator implements ProjectionEmitter {
+  readonly kind = 'controller';
+  readonly tier = 'lb4-idiom' as const;
+  readonly outputSuffix = '.base.controller.ts';
+  readonly description =
+    'LB4 REST controller — regen-always base + skipIfExists extension stub';
+  readonly peerDeps: string[] = [];
+  readonly templatePaths = [TPL_BASE, TPL_EXT];
+
+  /**
+   * Engine entry point. Adapts the public {@link EmitterContext} to the
+   * internal {@link GeneratorContext} the existing view-model builder
+   * consumes and always emits both the regen base and the skipIfExists
+   * extension stub. Returns `[]` when the schema has no associated LB4
+   * config — controllers are an LB4-idiom projection and have no meaning
+   * for a contract that opted out of LB4 metadata.
+   */
+  emit(ctx: EmitterContext): EmittedFile[] {
+    const schemaId = ctx.schema.$id;
+    if (typeof schemaId !== 'string') return [];
+    const config = ctx.configs?.get(schemaId) as ModelConfigJson | undefined;
+    if (config === undefined) return [];
+
+    const genCtx: GeneratorContext = {
+      registry: ctx.registry,
+      importMap: ctx.importMap,
+      templates: ctx.templates,
+      paths: ctx.paths,
+      lossy: ctx.lossy,
+      includeExtension: true,
+    };
+
+    return this.generateInternal(ctx.schema, config, genCtx);
+  }
+
+  /**
+   * Back-compat shim retained for `cli/commands/override.ts`, which still
+   * drives a single-contract override flow through the generator directly
+   * (it has no `EmitterContext` to hand off). Delegates to the same internal
+   * implementation `emit()` uses.
+   *
+   * @deprecated Use {@link emit} when wiring through the engine pipeline.
+   * This shim exists only for the CLI `override` command and will be removed
+   * once that command migrates to {@link EmitterContext}.
+   */
+  generate(
+    schema: JSONSchema,
+    config: ModelConfigJson,
+    ctx: GeneratorContext,
+  ): EmittedFile[] {
+    return this.generateInternal(schema, config, ctx);
+  }
+
   /**
    * Build the descriptors the engine writes for the controller projection of
-   * a single contract.
+   * a single contract. Shared by {@link emit} and the deprecated
+   * {@link generate} shim so the view-model and template wiring stays in one
+   * place.
    *
    * @param schema - The authored JSON Schema (`schemas/<name>.schema.json`).
    * @param config - The matching `configs/<name>.config.json` document.
    * @param ctx - Per-run generator context.
    */
-  generate(
+  private generateInternal(
     schema: JSONSchema,
     config: ModelConfigJson,
     ctx: GeneratorContext,
@@ -70,16 +142,13 @@ export class ControllerGenerator {
     assertIdPropertyShape(idProperty, schema, ctx);
     const idType = resolveIdType(schema, idProperty);
 
-    const baseContent = ctx.templates.render(
-      join(TEMPLATES_DIR, 'controller.base.ts.ejs'),
-      {
-        name: `${controllerName}Base`,
-        controllerName,
-        isPublic: config.public === true,
-        idProperty,
-        idType_: idType,
-      },
-    );
+    const baseContent = ctx.templates.render(TPL_BASE, {
+      name: `${controllerName}Base`,
+      controllerName,
+      isPublic: config.public === true,
+      idProperty,
+      idType_: idType,
+    });
 
     const basePath = posix.join('controllers', `${kebab}.base.controller.ts`);
     assertNoTraversal(basePath, PRODUCER);
@@ -93,10 +162,7 @@ export class ControllerGenerator {
     ];
 
     if (ctx.includeExtension) {
-      const extContent = ctx.templates.render(
-        join(TEMPLATES_DIR, 'controller.ts.ejs'),
-        {name: controllerName},
-      );
+      const extContent = ctx.templates.render(TPL_EXT, {name: controllerName});
       const extPath = posix.join('controllers', `${kebab}.controller.ts`);
       assertNoTraversal(extPath, PRODUCER);
       files.push({

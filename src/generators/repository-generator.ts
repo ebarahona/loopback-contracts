@@ -8,7 +8,13 @@ import {
   toKebab,
   toPascal,
 } from '../helpers';
-import type {EmittedFile, JSONSchema} from '../interfaces';
+import type {
+  EmittedFile,
+  EmitterContext,
+  JSONSchema,
+  ProjectionEmitter,
+} from '../interfaces';
+import {ContractsBindings} from '../keys';
 import type {ModelConfigJson, ModelRelationConfig} from '../types';
 import type {GeneratorContext} from './types';
 
@@ -37,15 +43,72 @@ interface RelationRepoView {
 }
 
 /**
- * Engine-internal generator for `src/repositories/<name>.base.repository.ts`
- * (regen) and the optional `<name>.repository.ts` extension stub
- * (skipIfExists). Always runs.
+ * LB4-idiom projection emitter for `src/repositories/<name>.base.repository.ts`
+ * (regen) and the user-editable `<name>.repository.ts` extension stub
+ * (skipIfExists).
  *
- * @internal
+ * Registered under `ContractsBindings.EMITTER_TAG` with `kind: 'repository'`
+ * so the engine discovers it via `@extensions.list({tag: EMITTER_TAG})`
+ * alongside sidecar emitters (zod, types, graphql, ...). Skips emission for
+ * any schema lacking a registered `ModelConfigJson` in
+ * {@link EmitterContext.configs} — repositories are an LB4-idiom projection
+ * and have nothing to emit for contracts-only schemas.
+ *
+ * @experimental
  */
-@injectable({scope: BindingScope.SINGLETON})
-export class RepositoryGenerator {
+@injectable({
+  scope: BindingScope.SINGLETON,
+  tags: {
+    [ContractsBindings.EMITTER_TAG]: ContractsBindings.EMITTER_TAG,
+    kind: 'repository',
+  },
+})
+export class RepositoryGenerator implements ProjectionEmitter {
+  readonly kind = 'repository';
+  readonly tier = 'lb4-idiom' as const;
+  readonly outputSuffix = '.base.repository.ts';
+  readonly description =
+    'LB4 DefaultCrudRepository — regen-always base + skipIfExists extension stub';
+  readonly peerDeps: string[] = [];
+  readonly templatePaths = [TPL_BASE, TPL_EXT];
+
+  emit(ctx: EmitterContext): EmittedFile[] {
+    const schemaId = ctx.schema.$id;
+    if (typeof schemaId !== 'string') return [];
+    const config = ctx.configs?.get(schemaId) as ModelConfigJson | undefined;
+    if (config === undefined) return [];
+
+    const genCtx: GeneratorContext = {
+      registry: ctx.registry,
+      importMap: ctx.importMap,
+      templates: ctx.templates,
+      paths: ctx.paths,
+      lossy: ctx.lossy,
+      includeExtension: true,
+    };
+
+    return this.generateInternal(ctx.schema, config, genCtx);
+  }
+
+  /**
+   * Back-compat entry point used by `lb4 override repository` (see
+   * `src/cli/commands/override.ts`). New callers should register the
+   * generator as a {@link ProjectionEmitter} and let the engine invoke
+   * {@link emit} per the standard discovery flow.
+   *
+   * @deprecated Use {@link emit} via the emitter extension point. Retained
+   * for the `override` CLI command which drives a single-contract render
+   * out-of-band from the main pipeline.
+   */
   generate(
+    schema: JSONSchema,
+    config: ModelConfigJson,
+    ctx: GeneratorContext,
+  ): EmittedFile[] {
+    return this.generateInternal(schema, config, ctx);
+  }
+
+  private generateInternal(
     schema: JSONSchema,
     config: ModelConfigJson,
     ctx: GeneratorContext,

@@ -7,6 +7,7 @@ export {InMemoryLossyReporter} from './lossy-reporter';
 export {FileWriter} from './file-writer';
 export type {ChangeReport, WriteResult} from './file-writer';
 export {InMemorySchemaRegistry} from './schema-registry';
+export {InMemoryConfigRegistry} from './config-registry';
 export {RelativeImportMap} from './import-map';
 export type {GetTargetPath} from './import-map';
 export {DefaultProjectPaths} from './project-paths';

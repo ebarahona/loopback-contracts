@@ -15,6 +15,7 @@
 // what crosses the public boundary.
 
 export type {
+  ConfigRegistry,
   EmittedFile,
   EmitterContext,
   ImportMap,

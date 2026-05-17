@@ -17,6 +17,8 @@ import type {
  * @public
  */
 export type KnownEmitterKind =
+  // Sidecar emitters (--emit-<kind> opt-in; tier 'real-translation' or
+  // 'convenience' depending on translation depth).
   | 'zod'
   | 'types'
   | 'graphql'
@@ -25,7 +27,16 @@ export type KnownEmitterKind =
   | 'proto'
   | 'avro'
   | 'openapi-components'
-  | 'mock-data';
+  | 'mock-data'
+  // LB4-idiom emitters (tier 'lb4-idiom'). Always-on by default — every
+  // `lb4 gen` regenerates the base files. Sidecars opt in; LB4 idiom
+  // files opt OUT (via `--no-emit-<kind>`) when a user genuinely doesn't
+  // want a category (e.g. a contracts-only project that ships no
+  // datasources).
+  | 'model'
+  | 'repository'
+  | 'controller'
+  | 'datasource';
 
 /**
  * Contract every projection emitter implements — the single stable extension

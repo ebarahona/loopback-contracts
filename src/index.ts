@@ -12,6 +12,7 @@ export type {
   ExtensionKeywordHandler,
   ImportMap,
   JSONSchema,
+  ConfigRegistry,
   KeywordContext,
   KnownEmitterKind,
   LoopbackConfigJson,

@@ -24,10 +24,11 @@ function readPackageVersion(): string {
 
 /**
  * Build the full help screen as a single string with a trailing
- * newline. Lists the seven user-facing commands; `lb4 gen` accepts nine
- * `--emit-<kind>` flags listed in the EMIT FLAGS table, plus the
- * matching `--no-emit-<kind>` overrides documented under
- * `lb4 gen --help`.
+ * newline. Lists the seven user-facing commands; `lb4 gen` accepts
+ * thirteen `--emit-<kind>` flags listed in the EMIT FLAGS tables
+ * (nine sidecar kinds + four LB4-idiom kinds), plus the matching
+ * `--no-emit-<kind>` overrides documented under `lb4 gen --help`.
+ * Sidecars default OFF (opt-in); LB4-idiom kinds default ON (opt-out).
  *
  * The emit-flags table is intentionally hard-coded. Querying
  * `EmitterRegistry` here would force `--help` to boot an LB4
@@ -57,7 +58,7 @@ export function renderHelp(): string {
     '  gen --watch | dev      Continuous regen on save (chokidar)',
     '  validate               Run all validation gates without emitting',
     '',
-    'GEN EMIT FLAGS',
+    'GEN EMIT FLAGS — sidecars (opt-in)',
     '  --emit-zod                Emit *.zod.ts sidecars',
     '  --emit-types              Emit *.types.ts sidecars',
     '  --emit-graphql            Emit *.graphql.ts sidecars (and *.graphql SDL if --emit-graphql-sdl)',
@@ -67,6 +68,12 @@ export function renderHelp(): string {
     '  --emit-avro               Emit *.avsc sidecars',
     '  --emit-openapi-components Emit *.openapi-components.yaml sidecars',
     '  --emit-mock-data          Emit *.mock.json sidecars',
+    '',
+    'GEN EMIT FLAGS — LB4-idiom (opt-out, default on)',
+    '  --no-emit-model           Skip *.base.model.ts regen',
+    '  --no-emit-repository      Skip *.base.repository.ts regen',
+    '  --no-emit-controller      Skip *.base.controller.ts regen',
+    '  --no-emit-datasource      Skip *.base.datasource.ts regen',
     '',
     'GLOBAL FLAGS',
     '  --strict         Promote warnings (lossy translations, breaking diffs) to errors',

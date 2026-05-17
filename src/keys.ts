@@ -11,6 +11,7 @@
 // expected and documents the same intent.
 import {BindingKey} from '@loopback/core';
 import type {
+  ConfigRegistry,
   ImportMap,
   LoopbackConfigJson,
   LossyReporter,
@@ -169,6 +170,17 @@ export namespace ContractsBindings {
    */
   export const LOSSY_REPORTER = BindingKey.create<LossyReporter>(
     'platform.contracts.lossy-reporter',
+  );
+
+  /**
+   * Per-contract LB4 metadata registry, populated by the engine at stage 5
+   * from `configs/*.config.json`. Surfaced on
+   * {@link EmitterContext.configs} for lb4-idiom-tier emitters.
+   *
+   * @public
+   */
+  export const CONFIG_REGISTRY = BindingKey.create<ConfigRegistry>(
+    'platform.contracts.config-registry',
   );
 
   /**

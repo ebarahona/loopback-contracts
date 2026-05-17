@@ -48,7 +48,7 @@ class DuplicateZodEmitter implements ProjectionEmitter {
 }
 
 describe('EmitterRegistry', () => {
-  it('lists every built-in emitter (9 sidecars)', async () => {
+  it('lists every built-in emitter (9 sidecars + 4 lb4-idiom)', async () => {
     const app = await buildApp();
     const reg = await app.get<EmitterRegistry>(
       ContractsEngineBindings.EMITTER_REGISTRY,
@@ -57,6 +57,7 @@ describe('EmitterRegistry', () => {
     const kinds = all.map(e => e.kind).sort();
     expect(kinds).toEqual(
       [
+        // Sidecars (tier: 'real-translation' | 'convenience').
         'asyncapi',
         'avro',
         'cloudevents',
@@ -66,9 +67,16 @@ describe('EmitterRegistry', () => {
         'proto',
         'types',
         'zod',
+        // LB4-idiom emitters (tier: 'lb4-idiom'). Same EMITTER_TAG channel
+        // as sidecars; differentiated only by `tier` for CLI default-on
+        // vs opt-in behavior.
+        'controller',
+        'datasource',
+        'model',
+        'repository',
       ].sort(),
     );
-    expect(all).toHaveLength(9);
+    expect(all).toHaveLength(13);
   });
 
   it('byKind() returns the matching emitter or undefined', async () => {
@@ -129,7 +137,7 @@ describe('EmitterRegistry', () => {
       ContractsEngineBindings.EMITTER_REGISTRY,
     );
     const meta = await reg.listMetadata();
-    expect(meta).toHaveLength(9);
+    expect(meta).toHaveLength(13);
     for (const m of meta) {
       expect(typeof m.kind).toBe('string');
       expect(typeof m.outputSuffix).toBe('string');

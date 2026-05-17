@@ -40,11 +40,16 @@ const PIPELINE_STAGES = 8;
  * Thin CLI wrapper around {@link Pipeline.run}.
  *
  * Bootstraps a one-off LB4 {@link Application} wired with
- * {@link ContractsComponent}, parses the gen-specific flags (including the
- * nine `--emit-<kind>` and matching `--no-emit-<kind>` overrides, the ESM
- * trio `--esm` / `--no-esm` / `--import-extension=<.js|.ts|>`, plus
- * `--watch` / `dev`-mode), invokes the pipeline once, and either exits or
- * keeps a debounced chokidar watcher running on every authored source file.
+ * {@link ContractsComponent}, parses the gen-specific flags (the thirteen
+ * `--emit-<kind>` / `--no-emit-<kind>` overrides — nine sidecar kinds plus
+ * four LB4-idiom kinds; the ESM trio `--esm` / `--no-esm` /
+ * `--import-extension=<.js|.ts|>`; plus `--watch` / `dev`-mode), invokes
+ * the pipeline once, and either exits or keeps a debounced chokidar
+ * watcher running on every authored source file.
+ *
+ * Default emit policy: LB4-idiom kinds (model/repository/controller/
+ * datasource) are ON unless `--no-emit-<kind>` is passed; sidecar kinds
+ * are OFF unless `--emit-<kind>` is passed.
  *
  * @param opts - Project root, parsed `loopback.config.json`, and the raw
  *   argv slice (the dispatcher strips the leading subcommand name).
@@ -325,8 +330,11 @@ async function bootstrap(
 // Flag parsing
 // ---------------------------------------------------------------------------
 
-/** Nine sidecar emitter kinds the `--emit-*` / `--no-emit-*` flags target. */
-const EMITTER_KINDS = [
+/**
+ * Sidecar emitter kinds. Opt-in via `--emit-<kind>` (or `config.emit.<kind>:
+ * true`); silent by default since most projects don't want every sidecar.
+ */
+const SIDECAR_EMITTER_KINDS = [
   'zod',
   'types',
   'graphql',
@@ -336,6 +344,29 @@ const EMITTER_KINDS = [
   'avro',
   'openapi-components',
   'mock-data',
+] as const;
+
+/**
+ * LB4-idiom emitter kinds. Default-ON for every `lb4 gen` because the whole
+ * point of running this in a LB4 app is to regenerate the base
+ * model/repo/controller/datasource files; users opt OUT per-kind via
+ * `--no-emit-<kind>` (or `config.emit.<kind>: false`). The matching
+ * generators (registered under `EMITTER_TAG`, tier `'lb4-idiom'`) only
+ * actually emit when a schema has a registered config — sidecar-only
+ * projects therefore see no output even with the default-on flag, so the
+ * default is safe.
+ */
+const LB4_IDIOM_EMITTER_KINDS = [
+  'model',
+  'repository',
+  'controller',
+  'datasource',
+] as const;
+
+/** Every kind the `--emit-*` / `--no-emit-*` flag parser recognises. */
+const EMITTER_KINDS = [
+  ...SIDECAR_EMITTER_KINDS,
+  ...LB4_IDIOM_EMITTER_KINDS,
 ] as const;
 
 /**
@@ -532,11 +563,17 @@ function mergeEmitFlags(
   config: LoopbackConfigJson,
   flags: ParsedFlags,
 ): Record<string, boolean> {
-  // `config.emit` carries `boolean` emitter toggles alongside the
-  // string-valued `esm` / `importExtension` slots (typed as `EmitValue`).
-  // Strip the string slots before merging so the pipeline's emit-flag
-  // map stays a pure `Record<string, boolean>`.
+  // Precedence (lowest to highest):
+  //   1. Seed: LB4-idiom kinds default to true (every `lb4 gen` regenerates
+  //      base files for model/repository/controller/datasource unless
+  //      explicitly turned off). Sidecar kinds default to false (opt-in).
+  //   2. `config.emit` carries `boolean` emitter toggles alongside the
+  //      string-valued `esm` / `importExtension` slots (typed as
+  //      `EmitValue`); the string slots are stripped here so the pipeline's
+  //      emit-flag map stays a pure `Record<string, boolean>`.
+  //   3. CLI overrides from `--emit-<kind>` / `--no-emit-<kind>` win last.
   const base: Record<string, boolean> = {};
+  for (const k of LB4_IDIOM_EMITTER_KINDS) base[k] = true;
   const source: Readonly<Record<string, EmitValue>> = config.emit ?? {};
   for (const [k, v] of Object.entries(source)) {
     if (typeof v === 'boolean') base[k] = v;
