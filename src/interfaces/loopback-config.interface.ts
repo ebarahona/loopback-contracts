@@ -1,3 +1,5 @@
+import type {ModelConfigJson} from '../types';
+
 /**
  * Value type for entries in {@link LoopbackConfigJson.emit}. Most entries
  * are boolean toggles keyed by emitter `kind`; two reserved keys carry
@@ -48,9 +50,12 @@ export interface LoopbackConfigJson {
   readonly emit: Readonly<Record<string, EmitValue>>;
   /**
    * Optional `loopback-config` integration — additional `@configClass`
-   * bindings to register alongside generated artefacts.
+   * bindings to register alongside generated artefacts. Each entry is
+   * validated against the engine-generated model-config meta-schema at
+   * pipeline stage 5 (same shape as a standalone `*.config.json` file),
+   * so the array element type is {@link ModelConfigJson}.
    */
-  readonly 'config-bindings'?: readonly unknown[];
+  readonly 'config-bindings'?: readonly ModelConfigJson[];
   /**
    * Optional per-emitter migration strategy when a schema change would
    * produce a breaking output (kebab-case key matches emitter `kind`).

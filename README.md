@@ -216,18 +216,18 @@ Source specs are configured in `loopback.config.json` under the `sources` array;
 
 ## 8-stage validation pipeline
 
-Every `lb4 gen` invocation walks the same eight stages in order. Failure at any stage halts the run with an actionable error pointing at the offending file and JSON pointer.
+Every `lb4 gen` invocation walks the same eight stages in order. Failure at any stage halts the run with an actionable error pointing at the offending file and JSON pointer. The stage labels below match the `stage` field surfaced on thrown `ContractsPipelineError`s (e.g. `source-fetch`, `schema-validation`, `backward-compat-diff`) so a CI failure is greppable straight back to this list.
 
 1. **Source fetch.** Resolve every source spec in `loopback.config.json` via its `SOURCE_TAG` resolver; download remote schemas into `.loopback/cache/` (with content-addressed caching); union the result into the registry.
-2. **Syntactic validation.** Ajv-validates every authored schema against the JSON Schema 2020-12 meta-schema. Catches malformed schemas before any other stage sees them.
-3. **Project-wide cross-reference validation.** Verify that every `$ref` resolves inside the merged registry; verify that every `configs/*.config.json` `$contractId` matches a schema `$id`; verify that every `relations.*.schema` reference points at a known contract.
-4. **Meta-schema regeneration.** Re-derive `_meta/model-config.schema.json` (project-specific `$contractId`, `dataSource`, and `relations.*.schema` enums), `_meta/datasources.schema.json` (project-specific `adapter` enum from installed connector peers), and `_meta/emitter-config.schema.json` (project-specific emitter enum from every registered `EMITTER_TAG` binding).
-5. **Config validation.** Ajv-validate every `configs/*.config.json` against the freshly regenerated `_meta/model-config.schema.json`. This is the gate where cross-reference typos fail loud.
-6. **Emitter dispatch.** For every schema, for every enabled emitter (built-in, plugin, manifest), call `emit(EmitterContext)`. Emitters return `EmittedFile[]`; the engine collects them.
-7. **File write.** Apply the regen-always / scaffold-once rules: `.base.*` files force-overwrite, extension files skip-if-exists, barrel files regenerate, `_meta/` regenerates. Lossy-translation warnings are aggregated and printed.
-8. **Optional `tsc` pass.** When run in CI mode (`lb4 gen --check`), the engine invokes `tsc --noEmit` on the produced bases to verify the generated TS compiles. Off by default in dev to keep the watch loop sub-second.
+2. **Schema validation.** Ajv-validates every fetched schema against the JSON Schema 2020-12 meta-schema; requires a non-empty top-level `$id`. Catches malformed schemas and `$id`-less documents before any other stage sees them.
+3. **Dedupe.** Add every schema to the in-memory registry, keyed by `$id`. Same content silently dedupes (a schema can legitimately surface through multiple sources); a duplicate `$id` with differing content halts the run.
+4. **`$ref` resolution.** Walk every schema and verify that every `$ref` resolves inside the merged registry per RFC 3986 §5.3 (base-URI tracking through nested `$id`). Remote `$ref`s (`git+`, `npm:`) are out of scope for v1.0 and fail loud.
+5. **Config validation.** Re-derive `_meta/model-config.schema.json` (project-specific `$contractId`, `dataSource`, and `relations.*.schema` enums), `_meta/datasources.schema.json` (project-specific `adapter` enum from installed connector peers), and `_meta/emitter.schema.json` (project-specific emitter enum from every registered `EMITTER_TAG` binding); then Ajv-validate every `configs/*.config.json` and every inline `config-bindings[]` entry in `loopback.config.json` against the freshly regenerated `_meta/model-config.schema.json`. This is the gate where cross-reference typos fail loud.
+6. **Backward-compat diff.** For every schema whose source descriptor changed pin (e.g. `#v1.2.0` -> `#v1.3.0`), classify the shape delta as `additive` / `narrowing` / `breaking`. A `breaking` verdict refuses the run unless `--allow-breaking` is set or `migration-strategy.<schemaId>.mode = 'allow'` is declared in `loopback.config.json`.
+7. **Codegen (emitter dispatch + file write).** For every schema, for every enabled emitter (built-in, plugin, manifest), call `emit(EmitterContext)`; collect `EmittedFile[]`; apply the regen-always / scaffold-once rules in a single atomic commit (`.base.*` files force-overwrite, extension files skip-if-exists, barrels regenerate, `_meta/` regenerates). Lossy-translation warnings are aggregated and printed.
+8. **`tsc --noEmit`.** Invokes `tsc --noEmit` against the project's `tsconfig.json` to verify the generated TS compiles. Runs by default; opt out with `--skip-tsc` (used by `--dry-run` paths and faster local rerolls). No-ops cleanly when the project has no `tsconfig.json`.
 
-`--strict` promotes every lossy-translation warning at stage 6 to an error, halting the run before stage 7. Useful in CI where any silent approximation is a build failure.
+`--strict` promotes every lossy-translation warning at stage 7 to an error, halting the run before any files land. Useful in CI where any silent approximation is a build failure.
 
 ## Extension points
 

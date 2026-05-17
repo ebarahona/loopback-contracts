@@ -675,18 +675,21 @@ export class Pipeline {
       }
 
       // Validate inline `config-bindings` entries in `loopback.config.json`.
+      // `LoopbackConfigJson['config-bindings']` is now typed as
+      // `readonly ModelConfigJson[]`, so `entry` is `ModelConfigJson` at
+      // destructure time — no `as unknown as ModelConfigJson` double-cast
+      // needed. Ajv's `ValidateFunction` type-guard narrows `entry` to
+      // `unknown` inside the success branch, so a single `as ModelConfigJson`
+      // re-asserts the declared array element type.
       const inline = opts.config['config-bindings'];
       if (Array.isArray(inline)) {
         const inlineConfigPath = join(opts.projectRoot, 'loopback.config.json');
         for (const [i, entry] of inline.entries()) {
           const ok = validate(entry);
           if (!ok) {
-            const candidate = isPlainObject(entry)
-              ? (entry as unknown as ModelConfigJson)
-              : undefined;
             const contractId =
-              candidate && typeof candidate.$contractId === 'string'
-                ? candidate.$contractId
+              typeof entry.$contractId === 'string'
+                ? entry.$contractId
                 : '<unknown>';
             throw new ContractsValidationError(
               `stage 5: loopback.config.json.config-bindings[${i}] failed meta-schema validation:\n${formatAjvErrors(validate.errors)}`,
@@ -700,10 +703,7 @@ export class Pipeline {
           // Validation passed — load into the per-contract config registry so
           // lb4-idiom-tier emitters (model/repository/controller/datasource)
           // can look up their LB4 metadata by `$contractId` at emit time.
-          if (isPlainObject(entry)) {
-            // Ajv validated against buildModelConfigMetaSchema(); the shape is `ModelConfigJson` by construction.
-            this.configs.add(entry as unknown as ModelConfigJson);
-          }
+          this.configs.add(entry as ModelConfigJson);
         }
       }
     } catch (err) {

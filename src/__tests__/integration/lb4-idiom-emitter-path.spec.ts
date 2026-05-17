@@ -49,6 +49,14 @@ const ROOT_FIVE_SCHEMAS = join(
   tmpdir(),
   `lb4-idiom-five-schemas-${randomBytes(8).toString('hex')}`,
 );
+// Cycle-3 fix fixture: schema + inline `config-bindings` entry in
+// `loopback.config.json`, NO `configs/<name>.config.json` on disk. Proves
+// the inline branch of stage 5 populates `ConfigRegistry` so the
+// lb4-idiom emitters fire end-to-end through `pipeline.run()`.
+const ROOT_INLINE_BINDINGS = join(
+  tmpdir(),
+  `lb4-idiom-inline-bindings-${randomBytes(8).toString('hex')}`,
+);
 
 const CONFIG: LoopbackConfigJson = {
   name: 'lb4-idiom-emitter-path',
@@ -226,11 +234,64 @@ function seedFiveSchemasFixture(root: string): void {
   );
 }
 
+// Seeder for the inline-bindings fixture: a schema + inline
+// `config-bindings` entry inside `loopback.config.json` instead of a
+// `configs/person.config.json` sidecar. The inline entry mirrors the
+// same `ModelConfigJson` shape stage 5 validates from disk, so this
+// fixture exercises the cycle-3 fix that ALSO routes inline entries into
+// `ConfigRegistry`. `datasources.json` is still on disk so the
+// `dataSource: 'mem'` reference passes meta-schema validation.
+function seedInlineBindingsFixture(root: string): void {
+  mkdirSync(join(root, 'schemas'), {recursive: true});
+
+  const inlineConfig: LoopbackConfigJson = {
+    ...CONFIG,
+    'config-bindings': [PERSON_CONFIG],
+  };
+
+  writeFileSync(
+    join(root, 'loopback.config.json'),
+    JSON.stringify(inlineConfig, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'schemas', 'person.schema.json'),
+    JSON.stringify(PERSON_SCHEMA, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'datasources.json'),
+    JSON.stringify(DATASOURCES, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'tsconfig.json'),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'commonjs',
+          strict: true,
+          esModuleInterop: true,
+          skipLibCheck: true,
+          outDir: './dist',
+          rootDir: './src',
+        },
+        include: ['src/**/*'],
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+}
+
 beforeAll(() => {
   seedFixture(ROOT_WITH_CONFIG, true);
   seedFixture(ROOT_NO_CONFIG, false);
   seedDatasourcesOnlyFixture(ROOT_DATASOURCES_ONLY);
   seedFiveSchemasFixture(ROOT_FIVE_SCHEMAS);
+  seedInlineBindingsFixture(ROOT_INLINE_BINDINGS);
 });
 
 afterAll(() => {
@@ -238,6 +299,7 @@ afterAll(() => {
   rmSync(ROOT_NO_CONFIG, {recursive: true, force: true});
   rmSync(ROOT_DATASOURCES_ONLY, {recursive: true, force: true});
   rmSync(ROOT_FIVE_SCHEMAS, {recursive: true, force: true});
+  rmSync(ROOT_INLINE_BINDINGS, {recursive: true, force: true});
 });
 
 async function bootstrap(
@@ -451,6 +513,52 @@ describe('LB4-idiom emitter path — edge cases (PR-C follow-up)', () => {
       );
 
       expect(datasourceBases).toHaveLength(1);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  // Cycle-3 regression: inline `config-bindings` entries in
+  // `loopback.config.json` must populate `ConfigRegistry` so the
+  // lb4-idiom emitters (model/repository/controller) fire — the same as
+  // the on-disk `configs/<name>.config.json` path. Before the cycle-3
+  // fix, stage 5 only loaded disk-config files into the registry, so a
+  // project that authored its bindings inline saw zero lb4-idiom output.
+  // This scenario writes NO `configs/` directory; the lb4-idiom files
+  // appearing in `result.filesWritten` prove the inline path is wired
+  // end-to-end through `pipeline.run()`.
+  it('routes lb4-idiom emitters through inline config-bindings (no configs/ directory)', async () => {
+    const inlineConfig: LoopbackConfigJson = {
+      ...CONFIG,
+      'config-bindings': [PERSON_CONFIG],
+    };
+    const app = await bootstrap(ROOT_INLINE_BINDINGS, inlineConfig);
+    try {
+      const pipeline = await app.get<Pipeline>(
+        ContractsEngineBindings.PIPELINE,
+      );
+
+      const result = await pipeline.run({
+        projectRoot: ROOT_INLINE_BINDINGS,
+        config: {
+          ...inlineConfig,
+          schemas: [join(ROOT_INLINE_BINDINGS, 'schemas')],
+        },
+        emitFlags: {model: true, repository: true, controller: true},
+        skipTsc: true,
+      });
+
+      const written = result.filesWritten.map(p => p.replace(/\\/g, '/'));
+
+      expect(written.some(p => p.endsWith('models/person.base.model.ts'))).toBe(
+        true,
+      );
+      expect(
+        written.some(p => p.endsWith('repositories/person.base.repository.ts')),
+      ).toBe(true);
+      expect(
+        written.some(p => p.endsWith('controllers/person.base.controller.ts')),
+      ).toBe(true);
     } finally {
       await app.stop();
     }
