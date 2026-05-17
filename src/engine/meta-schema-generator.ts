@@ -257,6 +257,16 @@ export function buildLoopbackConfigMetaSchema(
  * because manifest emitters declare their own `kind`; the engine validates
  * uniqueness across the registry at registration time).
  *
+ * Two authoring forms are accepted via `oneOf`:
+ *
+ * - **Plural**: an `outputs` array of `{template, path, policy?}` entries.
+ * - **Legacy**: top-level `template` + `outputSuffix` (and optional
+ *   `outputDir`).
+ *
+ * Exactly one form must be present per manifest; the `oneOf` branch
+ * required-set enforces that without leaking the validator into the
+ * runtime `validateManifest` helper.
+ *
  * @internal
  */
 export function buildEmitterManifestMetaSchema(): JSONSchema {
@@ -266,18 +276,56 @@ export function buildEmitterManifestMetaSchema(): JSONSchema {
     title: 'LoopBack 4 contracts emitter manifest',
     type: 'object',
     additionalProperties: false,
-    required: ['kind', 'outputSuffix', 'tier', 'description', 'template'],
+    required: ['kind', 'tier', 'description'],
     properties: {
+      $schema: {type: 'string'},
       kind: {type: 'string', minLength: 1},
-      outputSuffix: {type: 'string', minLength: 1},
       tier: {
         type: 'string',
         enum: ['lb4-idiom', 'real-translation', 'convenience'],
       },
       description: {type: 'string'},
-      template: {type: 'string', minLength: 1},
       peerDeps: {type: 'array', items: {type: 'string'}},
       perSchemaOptionsSchema: {type: 'object'},
+      // Plural form — preferred.
+      outputs: {
+        type: 'array',
+        minItems: 1,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['template', 'path'],
+          properties: {
+            template: {type: 'string', minLength: 1},
+            path: {type: 'string', minLength: 1},
+            policy: {type: 'string', enum: ['regen', 'skipIfExists']},
+          },
+        },
+      },
+      // Legacy singular form — kept for back-compat.
+      template: {type: 'string', minLength: 1},
+      outputSuffix: {type: 'string', minLength: 1},
+      outputDir: {type: 'string', minLength: 1},
     },
+    // Exactly one form: plural `outputs`, or the legacy
+    // `template`+`outputSuffix` pair. The two branches deliberately list
+    // the OTHER form's required keys under `not.required` so a manifest
+    // mixing both fails meta-schema validation up front.
+    oneOf: [
+      {
+        required: ['outputs'],
+        not: {
+          anyOf: [
+            {required: ['template']},
+            {required: ['outputSuffix']},
+            {required: ['outputDir']},
+          ],
+        },
+      },
+      {
+        required: ['template', 'outputSuffix'],
+        not: {required: ['outputs']},
+      },
+    ],
   };
 }

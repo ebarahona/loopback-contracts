@@ -3,6 +3,7 @@ import {
   CoreBindings,
   inject,
   injectable,
+  lifeCycleObserver,
   type Application,
   type LifeCycleObserver,
 } from '@loopback/core';
@@ -43,6 +44,7 @@ const debug = createDebug('loopback:contracts:manifest-emitter-booter');
  *
  * @internal
  */
+@lifeCycleObserver('contracts')
 @injectable({scope: BindingScope.SINGLETON})
 export class ManifestEmitterBooter implements LifeCycleObserver {
   /** Keys this booter added to the application context, for stop() cleanup. */
@@ -111,11 +113,27 @@ export class ManifestEmitterBooter implements LifeCycleObserver {
       }
       const manifest = validateManifest(raw);
       const templatePath = resolveTemplatePath(file, manifest);
+      // Per-output template paths in plural-form manifests resolve against
+      // the project root by convention (per the doc's "templates/<name>/*.ejs"
+      // layout). Absolute paths pass through. The booter pre-resolves so
+      // ManifestBackedEmitter only deals with absolute paths.
+      const outputTemplatePaths = (manifest.outputs ?? []).map(o =>
+        isAbsolute(o.template)
+          ? o.template
+          : resolve(this.projectRoot, o.template),
+      );
 
       const bindingKey = `platform.contracts.emitters.manifest.${manifest.kind}`;
       this.app
         .bind<ManifestBackedEmitter>(bindingKey)
-        .toDynamicValue(() => new ManifestBackedEmitter(manifest, templatePath))
+        .toDynamicValue(
+          () =>
+            new ManifestBackedEmitter(
+              manifest,
+              templatePath,
+              outputTemplatePaths,
+            ),
+        )
         .tag({
           [EMITTER_TAG]: EMITTER_TAG,
           kind: manifest.kind,
@@ -180,14 +198,22 @@ async function readJson(path: string): Promise<unknown> {
 }
 
 /**
- * Absolutise the manifest's `template` field. Relative paths resolve against
- * the manifest's own directory so authors can keep templates beside the
- * manifest (`./templates/foo.ts.ejs`); absolute paths pass through unchanged.
+ * Absolutise the manifest's `template` field. Relative paths resolve
+ * against the manifest's own directory so authors can keep templates
+ * beside the manifest (`./templates/foo.ts.ejs`); absolute paths pass
+ * through unchanged.
+ *
+ * Plural form: when the manifest declares `outputs[]` instead of the
+ * legacy singular `template`, this helper returns an empty string —
+ * {@link ManifestBackedEmitter} only consumes the booter-supplied
+ * absolute path for legacy-form manifests and ignores it for plural-form
+ * ones (whose `outputs[].template` paths are author-supplied).
  */
 function resolveTemplatePath(
   manifestPath: string,
   manifest: EmitterManifest,
 ): string {
+  if (typeof manifest.template !== 'string') return '';
   if (isAbsolute(manifest.template)) return manifest.template;
   return resolve(dirname(manifestPath), manifest.template);
 }

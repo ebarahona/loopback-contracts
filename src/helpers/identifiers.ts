@@ -50,6 +50,29 @@ export function toKebab(s: string): string {
 }
 
 /**
+ * Convert any identifier-shaped string to camelCase.
+ *
+ * @internal
+ */
+export function toCamel(s: string): string {
+  const parts = splitWords(s);
+  if (parts.length === 0) return '';
+  return [
+    parts[0],
+    ...parts.slice(1).map(w => w.charAt(0).toUpperCase() + w.slice(1)),
+  ].join('');
+}
+
+/**
+ * Convert any identifier-shaped string to snake_case.
+ *
+ * @internal
+ */
+export function toSnake(s: string): string {
+  return splitWords(s).join('_');
+}
+
+/**
  * Read the `idProperty` declared on a model config. Defaults to `'id'` when
  * the config omits `model.idProperty` or supplies a non-string value.
  *

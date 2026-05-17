@@ -7,7 +7,7 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {ManifestEmitterBooter} from '../../engine/manifest-emitter-booter';
 import {EMITTER_TAG} from '../../keys';
 
-interface ManifestFixture {
+interface LegacyManifestFixture {
   kind: string;
   outputSuffix: string;
   tier: 'lb4-idiom' | 'real-translation' | 'convenience';
@@ -15,7 +15,18 @@ interface ManifestFixture {
   template: string;
 }
 
-function writeFixture(root: string, manifest: ManifestFixture): void {
+interface PluralManifestFixture {
+  kind: string;
+  tier: 'lb4-idiom' | 'real-translation' | 'convenience';
+  description: string;
+  outputs: ReadonlyArray<{
+    template: string;
+    path: string;
+    policy?: 'regen' | 'skipIfExists';
+  }>;
+}
+
+function writeFixture(root: string, manifest: LegacyManifestFixture): void {
   const dir = join(root, 'emitters');
   mkdirSync(dir, {recursive: true});
   writeFileSync(
@@ -24,6 +35,24 @@ function writeFixture(root: string, manifest: ManifestFixture): void {
     'utf8',
   );
   writeFileSync(join(dir, manifest.template), '// fixture template', 'utf8');
+}
+
+function writePluralFixture(
+  root: string,
+  manifest: PluralManifestFixture,
+): void {
+  const dir = join(root, 'emitters');
+  mkdirSync(dir, {recursive: true});
+  writeFileSync(
+    join(dir, `${manifest.kind}.emitter.json`),
+    JSON.stringify(manifest),
+    'utf8',
+  );
+  // Plural-form outputs[].template paths are author-supplied absolute paths,
+  // so create the template files at those exact locations.
+  for (const out of manifest.outputs) {
+    writeFileSync(out.template, '// fixture template', 'utf8');
+  }
 }
 
 function makeBooter(root: string): {
@@ -108,5 +137,55 @@ describe('ManifestEmitterBooter idempotency', () => {
   it('does not throw when stop() runs without a prior start()', async () => {
     const {booter} = makeBooter(root);
     await expect(booter.stop()).resolves.toBeUndefined();
+  });
+});
+
+describe('ManifestEmitterBooter plural outputs[]', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = join(
+      tmpdir(),
+      `lb-contracts-booter-plural-${randomBytes(6).toString('hex')}`,
+    );
+    mkdirSync(join(root, 'emitters', 'templates'), {recursive: true});
+    writePluralFixture(root, {
+      kind: 'plural-fixture',
+      tier: 'convenience',
+      description: 'plural fixture',
+      outputs: [
+        {
+          template: join(root, 'emitters', 'templates', 'a.ejs'),
+          path: 'models/{{kebabName}}.a.ts',
+        },
+        {
+          template: join(root, 'emitters', 'templates', 'b.ejs'),
+          path: 'models/{{kebabName}}.b.ts',
+          policy: 'skipIfExists',
+        },
+      ],
+    });
+  });
+
+  afterEach(() => {
+    rmSync(root, {recursive: true, force: true});
+  });
+
+  it('binds the plural-form manifest exactly once across repeated starts', async () => {
+    const {app, booter} = makeBooter(root);
+    await booter.start();
+    await booter.start();
+    const bindings = listManifestBindings(app);
+    expect(bindings).toEqual([
+      'platform.contracts.emitters.manifest.plural-fixture',
+    ]);
+  });
+
+  it('cleans up the plural-form binding on stop()', async () => {
+    const {app, booter} = makeBooter(root);
+    await booter.start();
+    expect(listManifestBindings(app)).toHaveLength(1);
+    await booter.stop();
+    expect(listManifestBindings(app)).toHaveLength(0);
   });
 });
