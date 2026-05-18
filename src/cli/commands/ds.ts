@@ -11,7 +11,14 @@
 import {existsSync, readFileSync} from 'node:fs';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
-import {applyEdits, format, modify, parse as parseJsonc} from 'jsonc-parser';
+import {
+  applyEdits,
+  format,
+  modify,
+  parse as parseJsonc,
+  printParseErrorCode,
+  type ParseError,
+} from 'jsonc-parser';
 import {createCliContext} from '../cli-context';
 import {ContractsError, ContractsValidationError} from '../../helpers';
 import type {LoopbackConfigJson} from '../../types';
@@ -144,6 +151,11 @@ export async function runDs(opts: {
       // SIGINT-equivalent exit code per UNIX convention.
       return 130;
     }
+    // Typed validation errors (e.g. malformed `datasources.json`) are
+    // re-thrown so the CLI dispatcher's `renderError` path can format the
+    // structured fields (sourcePath, instancePath) into the standard error
+    // block. Anything else falls back to a flat one-line message.
+    if (err instanceof ContractsValidationError) throw err;
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`Error: ${message}\n`);
     return 1;
@@ -371,29 +383,67 @@ function buildEntry(parsed: ParsedArgs): Record<string, unknown> {
 /**
  * Load every existing datasource name from `datasources.json`, parsing it
  * as JSONC so a user-added comment doesn't break this round-trip. Returns
- * the parsed root object (or an empty object when the file is missing /
- * malformed) so the caller can both probe for duplicates and pass the same
- * text through `modify()` later.
+ * the parsed root object for the caller to probe for duplicates.
+ *
+ * Missing file is the "fresh project, first datasource" case — returns a
+ * keyed-map seed with the `$schema` pointer so the duplicate-check sees a
+ * well-formed document. The companion {@link writeDatasourceEntry} also
+ * seeds `$schema` on disk when the file is missing; the in-memory seed
+ * here just mirrors that on-disk shape.
+ *
+ * Existing-but-unreadable / malformed file is a hard failure: throws a
+ * {@link ContractsValidationError} carrying the absolute path and parse
+ * error message. Silently treating it as `{}` would let duplicate
+ * detection be bypassed and would clobber any user comment containing the
+ * original (broken) content — the user must fix `datasources.json` before
+ * `lb-contracts ds` can run.
  */
 function readDatasources(path: string): Record<string, unknown> {
-  if (!existsSync(path)) return {};
-  try {
-    const raw = readFileSync(path, 'utf8');
-    const parsed = parseJsonc(raw, [], {
-      allowTrailingComma: true,
-      disallowComments: false,
-    }) as unknown;
-    if (
-      parsed === null ||
-      typeof parsed !== 'object' ||
-      Array.isArray(parsed)
-    ) {
-      return {};
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
-    return {};
+  if (!existsSync(path)) {
+    return {$schema: './_meta/datasources.schema.json'};
   }
+
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new ContractsValidationError(
+      `Could not read datasources.json at ${path}: ${reason}. ` +
+        'Fix the file before re-running `lb-contracts ds`.',
+      {sourcePath: path, instancePath: ''},
+    );
+  }
+
+  const errors: ParseError[] = [];
+  const parsed = parseJsonc(raw, errors, {
+    allowTrailingComma: true,
+    disallowComments: false,
+  }) as unknown;
+
+  if (errors.length > 0) {
+    const first = errors[0] as ParseError;
+    const kind = printParseErrorCode(first.error);
+    const suffix =
+      errors.length > 1 ? ` (+${errors.length - 1} more error(s))` : '';
+    throw new ContractsValidationError(
+      `Malformed datasources.json at ${path}: JSONC parse error at ` +
+        `offset ${first.offset}: ${kind}${suffix}. ` +
+        'Fix the file before re-running `lb-contracts ds`.',
+      {sourcePath: path, instancePath: ''},
+    );
+  }
+
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ContractsValidationError(
+      `Malformed datasources.json at ${path}: expected a top-level JSON ` +
+        'object (keyed-map of datasource entries). ' +
+        'Fix the file before re-running `lb-contracts ds`.',
+      {sourcePath: path, instancePath: ''},
+    );
+  }
+
+  return parsed as Record<string, unknown>;
 }
 
 /**

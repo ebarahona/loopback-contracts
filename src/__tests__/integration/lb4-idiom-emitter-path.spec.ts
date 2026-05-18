@@ -622,7 +622,7 @@ function seedDsMissingFixture(root: string): void {
   );
   // Deliberately NO datasources.json — the cross-validation must reject
   // PERSON_CONFIG's `dataSource: 'mem'` reference and the hint must
-  // suggest `lb4 ds add mem`.
+  // suggest `lb-contracts ds mem --adapter <kind>`.
 }
 
 function seedDsTypoFixture(root: string): void {
@@ -715,7 +715,7 @@ describe('LB4-idiom emitter path — datasource cross-validation', () => {
           emitFlags: {model: true, repository: true},
           skipTsc: true,
         }),
-      ).rejects.toThrow(/lb4 ds add mem/);
+      ).rejects.toThrow(/lb-contracts ds mem/);
     } finally {
       await app.stop();
     }

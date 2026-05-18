@@ -1,4 +1,5 @@
 import {BindingScope, injectable} from '@loopback/core';
+import {parse as parseJsonc} from 'jsonc-parser';
 import {readFileSync} from 'node:fs';
 import {join, posix} from 'node:path';
 import {assertNoTraversal, toKebab} from '../helpers';
@@ -110,7 +111,10 @@ export class DatasourceGenerator implements ProjectionEmitter {
     let datasources: DatasourcesFile;
     try {
       const raw = readFileSync(datasourcesPath, 'utf8');
-      datasources = JSON.parse(raw) as DatasourcesFile;
+      datasources = parseJsonc(raw, [], {
+        allowTrailingComma: true,
+        disallowComments: false,
+      }) as DatasourcesFile;
     } catch {
       // No `datasources.json` (or unreadable) — project has no datasources
       // to emit. Treat as a benign empty set; the engine will simply skip

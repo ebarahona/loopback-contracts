@@ -139,12 +139,24 @@ describe('CLI end-to-end (init -> contract -> gen)', () => {
     expect(config.emit['zod']).toBe(true);
     expect(config.emit['types']).toBe(true);
 
+    // Seed `datasources.json` before scaffolding any contract. The wizard
+    // requires at least one declared datasource to bind to — without this
+    // step `runContract` exits non-zero with a "no datasources declared"
+    // error (which is the intended behaviour: a `dataSource: null` config
+    // would fail stage-5 validation at gen-time anyway). This mirrors what
+    // `lb-contracts ds primary --adapter memory` would have written.
+    writeFileSync(
+      join(ROOT, 'datasources.json'),
+      JSON.stringify({mem: {adapter: 'memory', config: {}}}, null, 2),
+      'utf8',
+    );
+
     // ---- contract customer ----
     // Sequence consumed by `runContract`/`runManualWizard`:
     //   text(id) -> text(description) -> confirm('Add a property?') yes
     //   text(name), select(kind), confirm(required), [select(format)]
-    //   confirm(more?) no -> (no datasource block on disk yet; ds = null)
-    //   confirm(public) -> text(idProperty)
+    //   confirm(more?) no -> select(dataSource) -> confirm(public)
+    //   -> text(idProperty)
     answers.push(
       'customer.v1', // id
       '', // description
@@ -159,7 +171,7 @@ describe('CLI end-to-end (init -> contract -> gen)', () => {
       true, // required
       '', // format
       false, // confirm: add another? no
-      // datasource branch is skipped — no datasources.json at this point
+      'mem', // select(dataSource)
       true, // confirm: public?
       'id', // idProperty
     );
@@ -190,6 +202,7 @@ describe('CLI end-to-end (init -> contract -> gen)', () => {
       'number', // kind
       false, // required
       false, // add another -> stop
+      'mem', // select(dataSource)
       true, // public
       'id', // idProperty
     );
@@ -202,19 +215,14 @@ describe('CLI end-to-end (init -> contract -> gen)', () => {
     expect(existsSync(join(ROOT, 'schemas', 'order.schema.json'))).toBe(true);
     expect(existsSync(join(ROOT, 'configs', 'order.config.json'))).toBe(true);
 
-    // The config files reference `dataSource: null` because no datasources
-    // existed at scaffold time; rewrite to a concrete name so stage 5
-    // passes. This mirrors what `lb4 ds` would have done.
-    writeFileSync(
-      join(ROOT, 'datasources.json'),
-      JSON.stringify([{name: 'mem', adapter: 'memory', config: {}}], null, 2),
-      'utf8',
-    );
+    // Sanity-check: the wizard wrote `dataSource: 'mem'` directly — no
+    // post-hoc rewriting needed. Stage 5 will validate against
+    // `datasources.json` and pass.
     for (const name of ['customer', 'order']) {
-      const path = join(ROOT, 'configs', `${name}.config.json`);
-      const raw = JSON.parse(readFileSync(path, 'utf8'));
-      raw.dataSource = 'mem';
-      writeFileSync(path, JSON.stringify(raw, null, 2), 'utf8');
+      const raw = JSON.parse(
+        readFileSync(join(ROOT, 'configs', `${name}.config.json`), 'utf8'),
+      );
+      expect(raw.dataSource).toBe('mem');
     }
 
     // ---- gen ----

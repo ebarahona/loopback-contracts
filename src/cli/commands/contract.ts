@@ -82,7 +82,7 @@ interface WizardAnswers {
   id: string;
   description: string;
   properties: AuthoredProperty[];
-  dataSource: string | null;
+  dataSource: string;
   public: boolean;
   idProperty: string;
 }
@@ -140,10 +140,33 @@ export async function runContract(opts: RunContractOptions): Promise<number> {
       return await runExtensionSource(sourcePick.extension, kebabName);
     }
 
+    // Fail fast when the project has no datasources yet. The manual wizard
+    // must produce a config with a concrete `dataSource: <name>` because
+    // the model-config meta-schema requires `dataSource: string, minLength: 1`
+    // AND stage 5 cross-validates the value against `datasources.json`.
+    // Scaffolding `dataSource: null` would silently produce a config that
+    // breaks the next `lb-contracts gen` — surface an actionable error here
+    // instead of writing the invalid file.
+    const datasourceOptions = readDatasourceNames(opts.projectRoot);
+    if (datasourceOptions.length === 0) {
+      process.stderr.write(
+        'lb-contracts contract: no datasources are declared in this project.\n' +
+          'Every contract config needs a `dataSource: <name>` that matches a ' +
+          'datasource declared in `datasources.json`.\n' +
+          'Run `lb-contracts ds <name> --adapter <kind>` first ' +
+          '(e.g. `lb-contracts ds primary --adapter memory`), then re-run ' +
+          '`lb-contracts contract ' +
+          kebabName +
+          '`.\n',
+      );
+      return 2;
+    }
+
     const wizard = await runManualWizard({
       kebabName,
       projectRoot: opts.projectRoot,
       schemasDir: paths.schemasDir,
+      datasourceOptions,
     });
 
     const schemaDoc = buildSchemaDocument({
@@ -315,6 +338,7 @@ async function runManualWizard(opts: {
   kebabName: string;
   projectRoot: string;
   schemasDir: string;
+  datasourceOptions: readonly string[];
 }): Promise<WizardAnswers> {
   const id = await text({
     message: 'ID for this contract?',
@@ -343,28 +367,17 @@ async function runManualWizard(opts: {
     properties.push(prop);
   }
 
-  const datasourceOptions = readDatasourceNames(opts.projectRoot);
-  let dataSource: string | null;
-  if (datasourceOptions.length === 0) {
-    note(
-      'No `datasources.json` found at the project root. ' +
-        'Run `lb4 ds <name>` first if you want this contract bound to a ' +
-        'datasource; otherwise the binding stays null and you can wire it ' +
-        'later by hand-editing the config file.',
-      'Datasource',
-    );
-    dataSource = null;
-  } else {
-    const picked = await select<string>({
-      message: 'Datasource binding?',
-      options: [
-        {label: '(skip)', value: '__skip__'},
-        ...datasourceOptions.map(n => ({label: n, value: n})),
-      ],
-      initialValue: '__skip__',
-    });
-    dataSource = picked === '__skip__' ? null : picked;
-  }
+  // `runContract` only invokes the wizard when at least one datasource is
+  // declared, so the select prompt always has a real choice and the
+  // resulting value is guaranteed non-empty — exactly what the stage-5
+  // meta-schema (`dataSource: string, minLength: 1`) requires. The
+  // non-null assertion mirrors that invariant for `exactOptionalPropertyTypes`,
+  // which otherwise widens `datasourceOptions[0]` to `string | undefined`.
+  const dataSource = await select<string>({
+    message: 'Datasource binding?',
+    options: opts.datasourceOptions.map(n => ({label: n, value: n})),
+    initialValue: opts.datasourceOptions[0]!,
+  });
 
   const isPublic = await confirm({
     message: 'Expose REST endpoints (public: true)?',
@@ -555,7 +568,7 @@ function buildSchemaDocument(opts: {
 /** Assemble the per-model config document. */
 function buildConfigDocument(opts: {
   contractId: string;
-  dataSource: string | null;
+  dataSource: string;
   public: boolean;
   idProperty: string;
 }): Record<string, unknown> {
@@ -595,7 +608,8 @@ function resolvePaths(
 /**
  * Read `<projectRoot>/datasources.json` and return the list of datasource
  * names. Returns an empty array when the file is missing, unreadable, or
- * structurally unrecognised — callers fall back to "(skip)" only.
+ * structurally unrecognised — `runContract` treats an empty result as a
+ * hard error and refuses to scaffold a contract bound to nothing.
  *
  * Accepts both on-disk layouts:
  *   - The canonical keyed-object shape `lb4 ds` writes today, where each

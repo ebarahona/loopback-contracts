@@ -37,6 +37,7 @@ import {ModuleFormatTransformer} from './module-format-transformer';
 import {
   buildDatasourcesMetaSchema,
   buildEmitterManifestMetaSchema,
+  buildLoopbackConfigMetaSchema,
   buildModelConfigMetaSchema,
 } from './meta-schema-generator';
 import {InMemorySchemaRegistry} from './schema-registry';
@@ -616,15 +617,20 @@ export class Pipeline {
     // upstream, so reaching this point with a defined `rawDatasources`
     // means the file is on disk and parsed.
     const rawDatasources = await loadRawDatasources(opts.projectRoot);
+    // Best-effort discovery of `loopback-connector-*` peers in the
+    // project's `package.json` — the README documents `adapter` as a
+    // project-specific enum sourced from installed connector peers, so
+    // feeding the discovered list to `buildDatasourcesMetaSchema()`
+    // upgrades IntelliSense from "any string" to the concrete enum.
+    // Discovery failures (missing file, parse error) return `[]` and
+    // fall back to the open-string behaviour.
+    const installedAdapters = await discoverInstalledAdapters(opts.projectRoot);
     if (rawDatasources !== undefined) {
       // Compile via the engine's canonical compile-fresh helper so the
       // watch-mode rerun semantics (Ajv key-eviction by `$id`) hold —
-      // see `compileFresh()` for the invariant. `installedAdapters` is
-      // `[]` for now; node_modules-based adapter discovery is out of
-      // scope and the meta-schema omits the `adapter` enum when the
-      // list is empty (`buildDatasourcesMetaSchema()` handles that).
+      // see `compileFresh()` for the invariant.
       const datasourcesMeta = this.compileFresh(
-        buildDatasourcesMetaSchema([]) as JSONSchema,
+        buildDatasourcesMetaSchema(installedAdapters) as JSONSchema,
       );
       const ok = datasourcesMeta(rawDatasources.raw);
       if (!ok) {
@@ -649,17 +655,49 @@ export class Pipeline {
     // `writeQueue` and flush them in stage 7d alongside emitter output,
     // so any pre-codegen failure rolls back cleanly.
     const modelConfigMeta = buildModelConfigMetaSchema(schemas, datasources);
-    const datasourcesMeta = buildDatasourcesMetaSchema();
+    const datasourcesMeta = buildDatasourcesMetaSchema(installedAdapters);
     const emitterManifestMeta = buildEmitterManifestMetaSchema();
+    // Collect the registered emitter kinds so the loopback-config meta-
+    // schema can constrain `emit.*` boolean slots to the real kind enum
+    // — a typo like `emit.zodd` then fails meta-schema validation
+    // instead of silently disabling the intended emitter. CLI-side
+    // validation in `cli-context.ts` compiles the same builder with an
+    // empty enum, so this is the engine's "second validation pass" that
+    // catches the typo.
+    const emitterKinds = (await this.emitters.all()).map(e => e.kind);
+    const loopbackConfigMeta = buildLoopbackConfigMetaSchema(emitterKinds);
 
     // `lb-contracts validate` flips `skipMetaSchemaWrite` so the read-only
     // command never queues meta-schema writes. The meta-schemas are
-    // still built above so the in-memory Ajv validator below sees the
+    // still built above so the in-memory Ajv validators below see the
     // same shape `lb-contracts gen` would have written.
     if (opts.skipMetaSchemaWrite !== true) {
       this.queueMetaSchema('model-config.schema.json', modelConfigMeta);
       this.queueMetaSchema('datasources.schema.json', datasourcesMeta);
       this.queueMetaSchema('emitter.schema.json', emitterManifestMeta);
+      this.queueMetaSchema('loopback-config.schema.json', loopbackConfigMeta);
+    }
+
+    // Second validation pass: enforce the strict-kinds meta-schema on
+    // the in-memory `loopback.config.json`. CLI-side validation cannot
+    // know the registered emitter set (the engine owns the registry),
+    // so misspelled `emit.<kind>` slots slip through there. Run it
+    // here, AFTER the meta-schema is queued (so the on-disk schema and
+    // the runtime validator stay in lock-step) and using `compileFresh`
+    // for watch-mode rerun safety.
+    const loopbackConfigPath = join(opts.projectRoot, 'loopback.config.json');
+    const loopbackConfigValidate = this.compileFresh(
+      loopbackConfigMeta as JSONSchema,
+    );
+    const loopbackConfigOk = loopbackConfigValidate(opts.config);
+    if (!loopbackConfigOk) {
+      throw new ContractsValidationError(
+        `stage 5: loopback.config.json failed meta-schema validation:\n${formatAjvErrors(loopbackConfigValidate.errors)}`,
+        {
+          sourcePath: loopbackConfigPath,
+          instancePath: loopbackConfigValidate.errors?.[0]?.instancePath ?? '',
+        },
+      );
     }
 
     // Recompile the model-config meta-schema via the engine's canonical
@@ -1216,7 +1254,7 @@ function assertDatasourceDeclared(
   const hint =
     declared.size === 0
       ? 'Create `datasources.json` at the project root and add an entry for ' +
-        `'${config.dataSource}' (e.g. \`lb4 ds add ${config.dataSource}\`).`
+        `'${config.dataSource}' (e.g. \`lb-contracts ds ${config.dataSource} --adapter <kind>\`).`
       : `Available: ${available}. Add '${config.dataSource}' to ` +
         '`datasources.json` or correct the typo.';
   const instancePath =
@@ -1663,6 +1701,56 @@ async function loadRawDatasources(
     );
   }
   return {raw, path};
+}
+
+/**
+ * Best-effort scan of `<projectRoot>/package.json` for installed
+ * `loopback-connector-*` peers. Returns the suffixes of every match
+ * across `dependencies`, `devDependencies`, and `peerDependencies` so
+ * the datasources meta-schema can constrain `adapter` to the project's
+ * actual connector set — the README documents the enum as
+ * "project-specific from installed connector peers".
+ *
+ * Silent on every failure mode (missing file, unreadable file, malformed
+ * JSON, non-object root) — adapter-enum hinting is an authoring nicety,
+ * not a validation gate, so a broken `package.json` should never abort
+ * a `lb-contracts gen` run that would otherwise succeed.
+ */
+async function discoverInstalledAdapters(
+  projectRoot: string,
+): Promise<readonly string[]> {
+  const path = resolve(projectRoot, 'package.json');
+  let text: string;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch {
+    return [];
+  }
+  let pkg: unknown;
+  try {
+    pkg = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  if (!isPlainObject(pkg)) return [];
+  const sections: readonly string[] = [
+    'dependencies',
+    'devDependencies',
+    'peerDependencies',
+  ];
+  const out = new Set<string>();
+  const pattern = /^loopback-connector-(.+)$/;
+  for (const section of sections) {
+    const entries = (pkg as Record<string, unknown>)[section];
+    if (!isPlainObject(entries)) continue;
+    for (const name of Object.keys(entries)) {
+      const match = pattern.exec(name);
+      if (match && match[1] !== undefined && match[1].length > 0) {
+        out.add(match[1]);
+      }
+    }
+  }
+  return [...out].sort();
 }
 
 /**
