@@ -11,16 +11,13 @@
 import {existsSync, readFileSync} from 'node:fs';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
-import {
-  applyEdits,
-  format,
-  modify,
-  parse as parseJsonc,
-  printParseErrorCode,
-  type ParseError,
-} from 'jsonc-parser';
+import {applyEdits, format, modify} from 'jsonc-parser';
 import {createCliContext} from '../cli-context';
-import {ContractsError, ContractsValidationError} from '../../helpers';
+import {
+  ContractsError,
+  ContractsValidationError,
+  readDatasourcesDoc,
+} from '../../helpers';
 import type {LoopbackConfigJson} from '../../types';
 import {note, select, text} from '../prompts';
 
@@ -391,59 +388,45 @@ function buildEntry(parsed: ParsedArgs): Record<string, unknown> {
  * seeds `$schema` on disk when the file is missing; the in-memory seed
  * here just mirrors that on-disk shape.
  *
- * Existing-but-unreadable / malformed file is a hard failure: throws a
- * {@link ContractsValidationError} carrying the absolute path and parse
- * error message. Silently treating it as `{}` would let duplicate
- * detection be bypassed and would clobber any user comment containing the
- * original (broken) content — the user must fix `datasources.json` before
- * `lb-contracts ds` can run.
+ * The actual read + JSONC parse is delegated to
+ * {@link readDatasourcesDoc} so every CLI surface that touches
+ * `datasources.json` (`ds`, `contract`, the engine pipeline) produces
+ * an identical error block on corruption — path, JSONC error code, and
+ * the 1-based line:col where parsing went off the rails.
+ *
+ * Existing-but-unreadable / malformed file is a hard failure: the helper
+ * throws a {@link ContractsValidationError} that propagates through the
+ * caller's try/catch and is re-thrown to the dispatcher's `renderError`.
+ * Silently treating it as `{}` would let duplicate detection be bypassed
+ * and would clobber any user comment containing the original (broken)
+ * content — the user must fix `datasources.json` before `lb-contracts ds`
+ * can run.
+ *
+ * The array-form (legacy `[{name, adapter, ...}]`) layout is rejected
+ * here: `lb-contracts ds` only writes the keyed-map shape, and inserting
+ * a new entry into an array would silently change the document's
+ * structure. Users mid-migration must convert by hand.
  */
 function readDatasources(path: string): Record<string, unknown> {
-  if (!existsSync(path)) {
+  const doc = readDatasourcesDoc(path);
+  if (doc === undefined) {
     return {$schema: './_meta/datasources.schema.json'};
   }
 
-  let raw: string;
-  try {
-    raw = readFileSync(path, 'utf8');
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
+  if (Array.isArray(doc)) {
     throw new ContractsValidationError(
-      `Could not read datasources.json at ${path}: ${reason}. ` +
-        'Fix the file before re-running `lb-contracts ds`.',
+      `datasources.json at ${path} must be a JSON object ` +
+        '(keyed-map of datasource entries) for `lb-contracts ds`; ' +
+        'the legacy array-of-objects shape is read-only. ' +
+        'Convert the file by hand before re-running.',
       {sourcePath: path, instancePath: ''},
     );
   }
 
-  const errors: ParseError[] = [];
-  const parsed = parseJsonc(raw, errors, {
-    allowTrailingComma: true,
-    disallowComments: false,
-  }) as unknown;
-
-  if (errors.length > 0) {
-    const first = errors[0] as ParseError;
-    const kind = printParseErrorCode(first.error);
-    const suffix =
-      errors.length > 1 ? ` (+${errors.length - 1} more error(s))` : '';
-    throw new ContractsValidationError(
-      `Malformed datasources.json at ${path}: JSONC parse error at ` +
-        `offset ${first.offset}: ${kind}${suffix}. ` +
-        'Fix the file before re-running `lb-contracts ds`.',
-      {sourcePath: path, instancePath: ''},
-    );
-  }
-
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new ContractsValidationError(
-      `Malformed datasources.json at ${path}: expected a top-level JSON ` +
-        'object (keyed-map of datasource entries). ' +
-        'Fix the file before re-running `lb-contracts ds`.',
-      {sourcePath: path, instancePath: ''},
-    );
-  }
-
-  return parsed as Record<string, unknown>;
+  // `Array.isArray` narrowed away the `readonly unknown[]` arm, but TS
+  // doesn't fold `readonly`-tagged tuple types out of the union here —
+  // re-cast to the keyed-map member explicitly.
+  return doc as Record<string, unknown>;
 }
 
 /**

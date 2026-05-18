@@ -1,4 +1,6 @@
 export {collectSchemaFiles} from './collect-schema-files';
+export {offsetToLineCol, readDatasourcesDoc} from './datasources-loader';
+export type {DatasourcesDoc} from './datasources-loader';
 export {
   ContractsCodegenError,
   ContractsEmitterConflictError,

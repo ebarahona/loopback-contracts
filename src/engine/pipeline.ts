@@ -665,8 +665,24 @@ export class Pipeline {
     // empty enum, so this is the engine's "second validation pass" that
     // catches the typo.
     const emitterKinds = (await this.emitters.all()).map(e => e.kind);
-    const loopbackConfigMeta = buildLoopbackConfigMetaSchema(emitterKinds);
+    // Pass `schemas` and `datasources` so the loopback-config meta-
+    // schema's `config-bindings.items` slot (Q5 fix) tightens inline
+    // entries with the SAME enums as the standalone per-file pass:
+    // `$contractId` constrained to loaded schema `$id`s, `dataSource`
+    // constrained to declared datasource names.
+    const loopbackConfigMeta = buildLoopbackConfigMetaSchema(
+      emitterKinds,
+      schemas,
+      datasources,
+    );
 
+    // INVARIANT: in-memory meta-schemas drive validation NOW; the queued
+    // copies (`writeQueue` entries) reach disk only in stage 7d's atomic
+    // commit. A stage 5/6 failure between queue and flush leaves the
+    // previous `_meta/` revision on disk — that's the no-partial-writes
+    // guarantee. Editor IntelliSense lag is acceptable because the next
+    // successful `lb-contracts gen` re-queues the fresh shape.
+    //
     // `lb-contracts validate` flips `skipMetaSchemaWrite` so the read-only
     // command never queues meta-schema writes. The meta-schemas are
     // still built above so the in-memory Ajv validators below see the
@@ -1292,7 +1308,30 @@ function formatAjvErrors(errors: ErrorObject[] | null | undefined): string {
   return errors
     .map(e => {
       const path = e.instancePath.length === 0 ? '<root>' : e.instancePath;
-      return `  - ${path} ${e.message ?? ''} [keyword=${e.keyword}]`;
+      // Ajv's default `message` for `additionalProperties: false` is
+      // 'must NOT have additional properties' — which doesn't name the
+      // offending key. The rejected key sits on `params.additionalProperty`;
+      // appending it makes the typo immediately actionable (the diff
+      // between `zod` and `zodd` is otherwise invisible from the message).
+      // Mirror for `enum` violations, which Ajv reports without echoing
+      // the offending value.
+      const params = (e.params ?? {}) as Record<string, unknown>;
+      let suffix = '';
+      if (
+        e.keyword === 'additionalProperties' &&
+        typeof params['additionalProperty'] === 'string'
+      ) {
+        suffix = ` (unknown key: '${params['additionalProperty']}')`;
+      } else if (
+        e.keyword === 'enum' &&
+        Array.isArray(params['allowedValues'])
+      ) {
+        const allowed = (params['allowedValues'] as readonly unknown[])
+          .map(v => JSON.stringify(v))
+          .join(', ');
+        suffix = ` (allowed: ${allowed})`;
+      }
+      return `  - ${path} ${e.message ?? ''}${suffix} [keyword=${e.keyword}]`;
     })
     .join('\n');
 }
@@ -1711,12 +1750,21 @@ async function loadRawDatasources(
  * actual connector set — the README documents the enum as
  * "project-specific from installed connector peers".
  *
+ * Both LB4 naming conventions are accepted: the legacy unscoped
+ * `loopback-connector-<name>` form AND the official scoped
+ * `@loopback/connector-<name>` form (which is what stock LB4 projects
+ * pull in). Suffix captures from BOTH patterns are unioned into the
+ * same `Set` so an adapter installed under either name surfaces in the
+ * enum exactly once.
+ *
  * Silent on every failure mode (missing file, unreadable file, malformed
  * JSON, non-object root) — adapter-enum hinting is an authoring nicety,
  * not a validation gate, so a broken `package.json` should never abort
  * a `lb-contracts gen` run that would otherwise succeed.
+ *
+ * @internal
  */
-async function discoverInstalledAdapters(
+export async function discoverInstalledAdapters(
   projectRoot: string,
 ): Promise<readonly string[]> {
   const path = resolve(projectRoot, 'package.json');
@@ -1739,14 +1787,19 @@ async function discoverInstalledAdapters(
     'peerDependencies',
   ];
   const out = new Set<string>();
-  const pattern = /^loopback-connector-(.+)$/;
+  const patterns: readonly RegExp[] = [
+    /^loopback-connector-(.+)$/,
+    /^@loopback\/connector-(.+)$/,
+  ];
   for (const section of sections) {
     const entries = (pkg as Record<string, unknown>)[section];
     if (!isPlainObject(entries)) continue;
     for (const name of Object.keys(entries)) {
-      const match = pattern.exec(name);
-      if (match && match[1] !== undefined && match[1].length > 0) {
-        out.add(match[1]);
+      for (const pattern of patterns) {
+        const match = pattern.exec(name);
+        if (match && match[1] !== undefined && match[1].length > 0) {
+          out.add(match[1]);
+        }
       }
     }
   }

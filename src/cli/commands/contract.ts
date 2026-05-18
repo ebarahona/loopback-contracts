@@ -29,13 +29,16 @@ import {
   applyEdits,
   format as jsoncFormat,
   modify as jsoncModify,
-  parse as parseJsonc,
   type FormattingOptions,
 } from 'jsonc-parser';
 import {createCliContext} from '../cli-context';
 import {ContractsComponent} from '../../contracts.component';
 import {ContractsEngineBindings} from '../../engine';
-import {ContractsError, ContractsValidationError} from '../../helpers';
+import {
+  ContractsError,
+  ContractsValidationError,
+  readDatasourcesDoc,
+} from '../../helpers';
 import {SOURCE_EXTENSION_TAG} from '../../keys';
 import type {SourceExtension} from '../../interfaces';
 import type {LoopbackConfigJson} from '../../types';
@@ -210,6 +213,13 @@ export async function runContract(opts: RunContractOptions): Promise<number> {
       // SIGINT-equivalent exit code per UNIX convention.
       return 130;
     }
+    // Typed validation errors (e.g. malformed `datasources.json` surfaced
+    // by `readDatasourcesDoc`) are re-thrown so the CLI dispatcher's
+    // `renderError` path formats the structured fields (sourcePath,
+    // instancePath) into the standard error block. Mirrors the same
+    // re-throw in `ds.ts` so identical input produces identical output
+    // regardless of which command the user happened to run.
+    if (err instanceof ContractsValidationError) throw err;
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`Error: ${message}\n`);
     return 1;
@@ -607,9 +617,20 @@ function resolvePaths(
 
 /**
  * Read `<projectRoot>/datasources.json` and return the list of datasource
- * names. Returns an empty array when the file is missing, unreadable, or
- * structurally unrecognised — `runContract` treats an empty result as a
- * hard error and refuses to scaffold a contract bound to nothing.
+ * names. Returns an empty array when the file is missing or contains no
+ * recognised entries — `runContract` treats an empty result as a hard
+ * (but actionable) error and refuses to scaffold a contract bound to
+ * nothing, surfacing the "run `lb-contracts ds` first" nudge.
+ *
+ * Read + JSONC parse is delegated to {@link readDatasourcesDoc} so a
+ * malformed file produces an identical error block to the one
+ * `lb-contracts ds` emits — previously this function swallowed parse
+ * errors with `return []`, which conflated "no datasources" with
+ * "broken JSON" and left users staring at a misleading nudge instead of
+ * a parse-error pointer. The helper throws
+ * {@link ContractsValidationError} on corruption; we let it propagate to
+ * `runContract`'s catch, which re-throws it for the dispatcher's
+ * `renderError` to render.
  *
  * Accepts both on-disk layouts:
  *   - The canonical keyed-object shape `lb4 ds` writes today, where each
@@ -622,21 +643,12 @@ function resolvePaths(
  */
 function readDatasourceNames(projectRoot: string): readonly string[] {
   const path = resolve(projectRoot, 'datasources.json');
-  if (!existsSync(path)) return [];
-  let parsed: unknown;
-  try {
-    parsed = parseJsonc(readFileSync(path, 'utf8'), [], {
-      allowTrailingComma: true,
-      disallowComments: false,
-    });
-  } catch {
-    return [];
-  }
-  if (parsed === null) return [];
+  const doc = readDatasourcesDoc(path);
+  if (doc === undefined) return [];
 
-  if (Array.isArray(parsed)) {
+  if (Array.isArray(doc)) {
     const names: string[] = [];
-    for (const entry of parsed) {
+    for (const entry of doc) {
       if (
         entry !== null &&
         typeof entry === 'object' &&
@@ -649,19 +661,19 @@ function readDatasourceNames(projectRoot: string): readonly string[] {
     return names;
   }
 
-  if (typeof parsed === 'object') {
-    const names: string[] = [];
-    for (const key of Object.keys(parsed as Record<string, unknown>)) {
-      // `$schema` is the only reserved sibling key — every other top-level
-      // entry is a datasource name owned by the user.
-      if (key === '$schema') continue;
-      const value = (parsed as Record<string, unknown>)[key];
-      if (value !== null && typeof value === 'object') names.push(key);
-    }
-    return names;
+  // `Array.isArray` ruled out the array arm; cast the keyed-map member
+  // explicitly so `Object.keys` / indexed reads type-check without TS
+  // treating `readonly unknown[]` as a residual possibility.
+  const map = doc as Record<string, unknown>;
+  const names: string[] = [];
+  for (const key of Object.keys(map)) {
+    // `$schema` is the only reserved sibling key — every other top-level
+    // entry is a datasource name owned by the user.
+    if (key === '$schema') continue;
+    const value = map[key];
+    if (value !== null && typeof value === 'object') names.push(key);
   }
-
-  return [];
+  return names;
 }
 
 /**

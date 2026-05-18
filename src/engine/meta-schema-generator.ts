@@ -34,27 +34,28 @@ function collectSchemaIds(schemas: readonly JSONSchema[]): string[] {
 }
 
 /**
- * Build `_meta/model-config.schema.json` — the per-project meta-schema that
- * `configs/*.config.json` files are validated against in stage 5.
+ * Shared model-config item shape consumed by both
+ * {@link buildModelConfigMetaSchema} (where it forms the top-level
+ * document) AND {@link buildLoopbackConfigMetaSchema} (where it's
+ * embedded under `$defs.modelConfig` so the strict-kinds pass's
+ * `config-bindings.items` slot validates inline entries with the same
+ * rigour as the standalone per-file pass).
  *
- * The enums are baked from project state: `$contractId` only accepts an
- * `$id` declared by some loaded schema, `dataSource` only accepts a key
- * present in the project's `datasources.json`, and `relations.*.schema`
- * follows the same enum as `$contractId`.
- *
- * @internal
+ * Returns the inner fragment: `additionalProperties` / `required` /
+ * `properties`. Callers layer on their own `$schema` / `$id` / `title`
+ * and either keep `$defs` at the document root (the standalone schema)
+ * or nest the fragment under their own `$defs` (the loopback-config
+ * schema). The `acl` sub-definition lives at whichever document root
+ * embeds this shape — both callers ship an `$defs.acl` that the
+ * `acls: {items: {$ref: '#/$defs/acl'}}` slot resolves against
+ * because `$ref` inside `$defs.modelConfig` resolves against the
+ * EMBEDDING document's root, not this fragment.
  */
-export function buildModelConfigMetaSchema(
-  schemas: readonly JSONSchema[],
-  datasources: readonly DatasourceConfigJson[],
+function buildModelConfigItemShape(
+  schemaIds: readonly string[],
+  datasourceNames: readonly string[],
 ): JSONSchema {
-  const schemaIds = collectSchemaIds(schemas);
-  const datasourceNames = [...new Set(datasources.map(d => d.name))].sort();
-
   return {
-    $schema: 'https://json-schema.org/draft/2020-12/schema',
-    $id: 'https://ebarahona.dev/loopback-contracts/_meta/model-config.schema.json',
-    title: 'LoopBack 4 model-config (generated)',
     type: 'object',
     additionalProperties: false,
     required: ['$contractId', 'dataSource', 'public'],
@@ -62,12 +63,12 @@ export function buildModelConfigMetaSchema(
       $schema: {type: 'string'},
       $contractId: {
         type: 'string',
-        ...(schemaIds.length > 0 ? {enum: schemaIds} : {}),
+        ...(schemaIds.length > 0 ? {enum: [...schemaIds]} : {}),
       },
       dataSource: {
         type: 'string',
         minLength: 1,
-        ...(datasourceNames.length > 0 ? {enum: datasourceNames} : {}),
+        ...(datasourceNames.length > 0 ? {enum: [...datasourceNames]} : {}),
       },
       public: {type: 'boolean'},
       model: {
@@ -100,7 +101,7 @@ export function buildModelConfigMetaSchema(
             type: {type: 'string', enum: [...RELATION_TYPES]},
             schema: {
               type: 'string',
-              ...(schemaIds.length > 0 ? {enum: schemaIds} : {}),
+              ...(schemaIds.length > 0 ? {enum: [...schemaIds]} : {}),
             },
             through: {type: 'string'},
             keyFrom: {type: 'string'},
@@ -110,22 +111,61 @@ export function buildModelConfigMetaSchema(
       },
       acls: {type: 'array', items: {$ref: '#/$defs/acl'}},
     },
-    $defs: {
-      acl: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['principalType', 'principalId', 'permission', 'accessType'],
-        properties: {
-          principalType: {type: 'string', enum: ['ROLE', 'USER', 'APP']},
-          principalId: {type: 'string'},
-          permission: {type: 'string', enum: ['ALLOW', 'DENY']},
-          accessType: {
-            type: 'string',
-            enum: ['READ', 'WRITE', 'EXECUTE', '*'],
-          },
-          property: {type: 'string'},
-        },
+  };
+}
+
+/**
+ * The shared `acl` sub-definition referenced by every model-config
+ * `acls[i]` slot — extracted alongside {@link buildModelConfigItemShape}
+ * so both embedding sites (the standalone model-config schema AND the
+ * loopback-config schema's `$defs.modelConfig`) can publish an
+ * `$defs.acl` at their document root that the `{$ref: '#/$defs/acl'}`
+ * inside `acls` resolves against.
+ */
+function buildAclDef(): JSONSchema {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['principalType', 'principalId', 'permission', 'accessType'],
+    properties: {
+      principalType: {type: 'string', enum: ['ROLE', 'USER', 'APP']},
+      principalId: {type: 'string'},
+      permission: {type: 'string', enum: ['ALLOW', 'DENY']},
+      accessType: {
+        type: 'string',
+        enum: ['READ', 'WRITE', 'EXECUTE', '*'],
       },
+      property: {type: 'string'},
+    },
+  };
+}
+
+/**
+ * Build `_meta/model-config.schema.json` — the per-project meta-schema that
+ * `configs/*.config.json` files are validated against in stage 5.
+ *
+ * The enums are baked from project state: `$contractId` only accepts an
+ * `$id` declared by some loaded schema, `dataSource` only accepts a key
+ * present in the project's `datasources.json`, and `relations.*.schema`
+ * follows the same enum as `$contractId`.
+ *
+ * @internal
+ */
+export function buildModelConfigMetaSchema(
+  schemas: readonly JSONSchema[],
+  datasources: readonly DatasourceConfigJson[],
+): JSONSchema {
+  const schemaIds = collectSchemaIds(schemas);
+  const datasourceNames = [...new Set(datasources.map(d => d.name))].sort();
+  const shape = buildModelConfigItemShape(schemaIds, datasourceNames);
+
+  return {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: 'https://ebarahona.dev/loopback-contracts/_meta/model-config.schema.json',
+    title: 'LoopBack 4 model-config (generated)',
+    ...shape,
+    $defs: {
+      acl: buildAclDef(),
     },
   };
 }
@@ -229,8 +269,16 @@ export function buildDatasourcesMetaSchema(
  */
 export function buildLoopbackConfigMetaSchema(
   emitterKinds: readonly string[] = [],
+  schemas: readonly JSONSchema[] = [],
+  datasources: readonly DatasourceConfigJson[] = [],
 ): JSONSchema {
   const knownKinds = [...new Set(emitterKinds)].sort();
+  const schemaIds = collectSchemaIds(schemas);
+  const datasourceNames = [...new Set(datasources.map(d => d.name))].sort();
+  const modelConfigShape = buildModelConfigItemShape(
+    schemaIds,
+    datasourceNames,
+  );
   const emitProperties: Record<string, JSONSchema> = {
     esm: {
       type: 'boolean',
@@ -276,16 +324,35 @@ export function buildLoopbackConfigMetaSchema(
       schemas: {type: 'array', items: {type: 'string'}},
       emit: {
         type: 'object',
-        // Per JSON Schema 2020-12 §10.3.2.3 `additionalProperties`
-        // applies only to keys NOT covered by `properties` /
-        // `patternProperties`, so the reserved string-valued
+        // When the caller passes a non-empty `emitterKinds` list (the
+        // pipeline does, via `this.emitters.all()`), every legitimate
+        // boolean slot is enumerated under `properties` AND
+        // `additionalProperties: false` rejects anything else — closing
+        // the `emit.zodd` typo path Finding 3 originally surfaced.
+        //
+        // When `emitterKinds` is empty (CLI-side `readConfig()` which
+        // runs before the component boots and can't discover kinds),
+        // fall back to the documented "any boolean slot is allowed"
+        // shape so the CLI's loose pre-boot pass doesn't reject valid
+        // configs. The pipeline's STRICT-kinds second pass
+        // (stage 5, with the actual registry contents) then catches
+        // typos that slipped through. The reserved string-valued
         // `importExtension` slot listed in `properties` is exempt
-        // from this boolean constraint while every other key (a
-        // per-emitter `kind` toggle) must be a boolean.
-        additionalProperties: {type: 'boolean'},
+        // from this constraint per JSON Schema 2020-12 §10.3.2.3.
+        additionalProperties: knownKinds.length > 0 ? false : {type: 'boolean'},
         properties: emitProperties,
       },
-      'config-bindings': {type: 'array'},
+      // Q5 fix — `items` is constrained to the shared model-config
+      // shape via `$defs.modelConfig` so a typo INSIDE an inline
+      // `config-bindings[i]` entry (e.g. `'$contractIdd'`) fails THIS
+      // root-config strict pass too, not only the separate per-file
+      // `buildModelConfigMetaSchema` pass. The `$ref` resolves against
+      // THIS document's root, so we ship `$defs.acl` here as well to
+      // satisfy `acls[i]`'s `{$ref: '#/$defs/acl'}` lookup.
+      'config-bindings': {
+        type: 'array',
+        items: {$ref: '#/$defs/modelConfig'},
+      },
       'migration-strategy': {
         type: 'object',
         additionalProperties: {
@@ -298,6 +365,10 @@ export function buildLoopbackConfigMetaSchema(
           },
         },
       },
+    },
+    $defs: {
+      modelConfig: modelConfigShape,
+      acl: buildAclDef(),
     },
   };
 }

@@ -981,3 +981,156 @@ describe('LB4-idiom emitter path — datasources.json structural validation', ()
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Strict `loopback.config.json` validation: the Loop-1 pass runs the
+// strict-kinds meta-schema on the in-memory config AFTER the registry is
+// fully populated (so the engine knows the real emitter-kind set). The
+// pass catches three classes of authoring mistake at stage 5 instead of
+// surfacing them downstream as confusing tsc errors:
+//
+//   1. Wrong VALUE TYPE on a known emit kind (e.g. `emit.zod: "yes"`).
+//      The per-kind explicit `{type: 'boolean'}` slot rejects this with
+//      a precise instancePath of `/emit/zod`.
+//   2. Typo on an `emit.<kind>` slot (e.g. `emit.zodd: true`). The
+//      meta-schema currently accepts unknown boolean slots via
+//      `additionalProperties: {type: 'boolean'}` — pinning the strict
+//      pass's reach here means a future tightening (knownKinds non-empty
+//      => additionalProperties: false) will surface as a fixture change
+//      rather than a silent behaviour shift.
+//   3. Inline `config-bindings[i]` whose `$contractId` references an
+//      unknown schema (Agent B's Q5 `items: {$ref: '#/$defs/modelConfig'}`
+//      fix). Covered by the existing inline-bindings fixture above; this
+//      block focuses on the `emit` slot tightening.
+// ---------------------------------------------------------------------------
+
+const ROOT_EMIT_TYPO = join(
+  tmpdir(),
+  `lb4-idiom-emit-typo-${randomBytes(8).toString('hex')}`,
+);
+
+function seedEmitTypoFixture(root: string): void {
+  mkdirSync(join(root, 'schemas'), {recursive: true});
+  mkdirSync(join(root, 'configs'), {recursive: true});
+
+  // The on-disk file mirrors the in-memory config the bootstrap binds —
+  // the pipeline reads its config from the binding, but a future change
+  // that re-reads from disk would still see the same shape.
+  writeFileSync(
+    join(root, 'loopback.config.json'),
+    JSON.stringify({...CONFIG, emit: {zodd: true}}, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'schemas', 'person.schema.json'),
+    JSON.stringify(PERSON_SCHEMA, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'tsconfig.json'),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'commonjs',
+          strict: true,
+          esModuleInterop: true,
+          skipLibCheck: true,
+          outDir: './dist',
+          rootDir: './src',
+        },
+        include: ['src/**/*'],
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+}
+
+describe('LB4-idiom emitter path — strict emit-kinds validation', () => {
+  beforeAll(() => {
+    seedEmitTypoFixture(ROOT_EMIT_TYPO);
+  });
+
+  afterAll(() => {
+    rmSync(ROOT_EMIT_TYPO, {recursive: true, force: true});
+  });
+
+  it('rejects a wrong-type value on a known emit kind (emit.zod: "yes")', async () => {
+    // `zod` IS a registered emitter; the per-kind property slot
+    // `{type: 'boolean'}` injected by the strict pass rejects the
+    // string value with `/emit/zod must be boolean`. This is the
+    // direct end-to-end proof that the strict pass runs and produces
+    // a `ContractsValidationError` from stage 5.
+    const badValueConfig: LoopbackConfigJson = {
+      ...CONFIG,
+      emit: {zod: 'yes'} as unknown as LoopbackConfigJson['emit'],
+    };
+    const app = await bootstrap(ROOT_EMIT_TYPO, badValueConfig);
+    try {
+      const pipeline = await app.get<Pipeline>(
+        ContractsEngineBindings.PIPELINE,
+      );
+
+      await expect(
+        pipeline.run({
+          projectRoot: ROOT_EMIT_TYPO,
+          config: {
+            ...badValueConfig,
+            schemas: [join(ROOT_EMIT_TYPO, 'schemas')],
+          },
+          emitFlags: {},
+          skipTsc: true,
+        }),
+        // The error must name the offending field (`/emit/zod`) AND
+        // come from the strict pass (`failed meta-schema validation`).
+        // Asserting both pins the diagnostic shape, not just the throw.
+      ).rejects.toThrow(/failed meta-schema validation/);
+
+      await expect(
+        pipeline.run({
+          projectRoot: ROOT_EMIT_TYPO,
+          config: {
+            ...badValueConfig,
+            schemas: [join(ROOT_EMIT_TYPO, 'schemas')],
+          },
+          emitFlags: {},
+          skipTsc: true,
+        }),
+      ).rejects.toThrow(/\/emit\/zod/);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  // Documents the typo-rejection gap: the JSDoc on
+  // Post-Loop-2: `buildLoopbackConfigMetaSchema` now sets
+  // `additionalProperties: false` on `emit` when the caller passes a
+  // non-empty `emitterKinds` list. The pipeline's strict-kinds pass
+  // (stage 5) drives that path with the actual registered emitters,
+  // so `emit.zodd` fails meta-schema validation as documented.
+  it("rejects a typo'd emitter kind in loopback.config.json.emit (e.g. 'zodd')", async () => {
+    const typoConfig: LoopbackConfigJson = {
+      ...CONFIG,
+      emit: {zodd: true} as unknown as LoopbackConfigJson['emit'],
+    };
+    const app = await bootstrap(ROOT_EMIT_TYPO, typoConfig);
+    try {
+      const pipeline = await app.get<Pipeline>(
+        ContractsEngineBindings.PIPELINE,
+      );
+
+      await expect(
+        pipeline.run({
+          projectRoot: ROOT_EMIT_TYPO,
+          config: {...typoConfig, schemas: [join(ROOT_EMIT_TYPO, 'schemas')]},
+          emitFlags: {zodd: true},
+          skipTsc: true,
+        }),
+      ).rejects.toThrow(/zodd/);
+    } finally {
+      await app.stop();
+    }
+  });
+});
