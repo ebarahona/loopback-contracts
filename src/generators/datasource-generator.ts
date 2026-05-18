@@ -302,9 +302,20 @@ function isSafeKey(k: string): boolean {
 /**
  * Normalise the two accepted `datasources.json` layouts into a uniform
  * `[name, config]` tuple list. Mirrors `findDatasourceEntry()`'s tolerance
- * in `src/cli/commands/override.ts`. Silently drops entries that can't be
- * parsed (string values like `$schema`, malformed array members, anonymous
- * entries) — they belong to the validator's domain, not codegen's.
+ * in `src/cli/commands/override.ts` AND `parseDatasourcesJson()` in
+ * `src/engine/pipeline.ts` — keep all three in lock-step.
+ *
+ * Silently drops entries that can't be parsed (string values like
+ * `$schema`, malformed array members, anonymous entries, whitespace-only
+ * names) so the generator stays robust. The pipeline's stage-5
+ * `parseDatasourcesJson` is the authoritative validator and rejects the
+ * same shapes with a typed error — this generator runs AFTER stage 5
+ * succeeded, so the leniency here is belt-and-suspenders.
+ *
+ * Precedence in keyed-map form: the map key wins over any `name` field
+ * declared inside the value. Same rule the pipeline applies; the tuple
+ * returned uses the map key as `[0]` regardless of what `value.name`
+ * says.
  */
 function normaliseDatasources(
   datasources: DatasourcesFile,
@@ -314,13 +325,14 @@ function normaliseDatasources(
     for (const entry of datasources) {
       if (entry === null || typeof entry !== 'object') continue;
       const name = (entry as {name?: unknown}).name;
-      if (typeof name !== 'string' || name.length === 0) continue;
+      if (typeof name !== 'string' || name.trim().length === 0) continue;
       out.push([name, entry]);
     }
     return out;
   }
   for (const [name, dsConfig] of Object.entries(datasources)) {
     if (name === '$schema') continue;
+    if (name.trim().length === 0) continue;
     if (typeof dsConfig === 'string') continue;
     out.push([name, dsConfig]);
   }

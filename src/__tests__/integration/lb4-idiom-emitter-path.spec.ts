@@ -784,3 +784,193 @@ describe('LB4-idiom emitter path — datasource cross-validation', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Structural validation of `datasources.json` itself — duplicate names,
+// empty keys, malformed-but-valid-JSON top-level shapes. The pipeline must
+// reject these at stage 5 with a clear error rather than silently dropping
+// (or worse, deterministically picking the last duplicate) and surprising
+// the user downstream.
+// ---------------------------------------------------------------------------
+
+const ROOT_DS_DUPLICATE = join(
+  tmpdir(),
+  `lb4-idiom-ds-duplicate-${randomBytes(8).toString('hex')}`,
+);
+const ROOT_DS_EMPTY_KEY = join(
+  tmpdir(),
+  `lb4-idiom-ds-empty-key-${randomBytes(8).toString('hex')}`,
+);
+const ROOT_DS_ALL_FILTERED = join(
+  tmpdir(),
+  `lb4-idiom-ds-all-filtered-${randomBytes(8).toString('hex')}`,
+);
+
+function seedDsDuplicateFixture(root: string): void {
+  mkdirSync(join(root, 'schemas'), {recursive: true});
+  mkdirSync(join(root, 'configs'), {recursive: true});
+
+  writeFileSync(
+    join(root, 'loopback.config.json'),
+    JSON.stringify(CONFIG, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'schemas', 'person.schema.json'),
+    JSON.stringify(PERSON_SCHEMA, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'configs', 'person.config.json'),
+    JSON.stringify(PERSON_CONFIG, null, 2),
+    'utf8',
+  );
+  // Two entries with the same `name` — must be rejected, not silently
+  // de-duped to the last writer.
+  writeFileSync(
+    join(root, 'datasources.json'),
+    JSON.stringify(
+      [
+        {name: 'mem', adapter: 'memory', config: {}},
+        {name: 'mem', adapter: 'mongodb', config: {url: 'mongodb://x'}},
+      ],
+      null,
+      2,
+    ),
+    'utf8',
+  );
+}
+
+function seedDsEmptyKeyFixture(root: string): void {
+  mkdirSync(join(root, 'schemas'), {recursive: true});
+  mkdirSync(join(root, 'configs'), {recursive: true});
+
+  writeFileSync(
+    join(root, 'loopback.config.json'),
+    JSON.stringify(CONFIG, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'schemas', 'person.schema.json'),
+    JSON.stringify(PERSON_SCHEMA, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'configs', 'person.config.json'),
+    JSON.stringify(PERSON_CONFIG, null, 2),
+    'utf8',
+  );
+  // Whitespace-only map key — would generate a file named `   .base
+  // .datasource.ts` if accepted. Loader must reject.
+  writeFileSync(
+    join(root, 'datasources.json'),
+    JSON.stringify({'   ': {adapter: 'memory', config: {}}}, null, 2),
+    'utf8',
+  );
+}
+
+function seedDsAllFilteredFixture(root: string): void {
+  mkdirSync(join(root, 'schemas'), {recursive: true});
+  mkdirSync(join(root, 'configs'), {recursive: true});
+
+  writeFileSync(
+    join(root, 'loopback.config.json'),
+    JSON.stringify(CONFIG, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'schemas', 'person.schema.json'),
+    JSON.stringify(PERSON_SCHEMA, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'configs', 'person.config.json'),
+    JSON.stringify(PERSON_CONFIG, null, 2),
+    'utf8',
+  );
+  // Array entry missing the required `name` field — loader rejects
+  // the malformed entry with a typed error, not a silent skip that
+  // would leave the user wondering why their datasource was ignored.
+  writeFileSync(
+    join(root, 'datasources.json'),
+    JSON.stringify([{adapter: 'memory', config: {}}], null, 2),
+    'utf8',
+  );
+}
+
+describe('LB4-idiom emitter path — datasources.json structural validation', () => {
+  beforeAll(() => {
+    seedDsDuplicateFixture(ROOT_DS_DUPLICATE);
+    seedDsEmptyKeyFixture(ROOT_DS_EMPTY_KEY);
+    seedDsAllFilteredFixture(ROOT_DS_ALL_FILTERED);
+  });
+
+  afterAll(() => {
+    rmSync(ROOT_DS_DUPLICATE, {recursive: true, force: true});
+    rmSync(ROOT_DS_EMPTY_KEY, {recursive: true, force: true});
+    rmSync(ROOT_DS_ALL_FILTERED, {recursive: true, force: true});
+  });
+
+  it('rejects datasources.json with a duplicate name (was silently de-duped before)', async () => {
+    const app = await bootstrap(ROOT_DS_DUPLICATE, CONFIG);
+    try {
+      const pipeline = await app.get<Pipeline>(
+        ContractsEngineBindings.PIPELINE,
+      );
+
+      await expect(
+        pipeline.run({
+          projectRoot: ROOT_DS_DUPLICATE,
+          config: {...CONFIG, schemas: [join(ROOT_DS_DUPLICATE, 'schemas')]},
+          emitFlags: {model: true},
+          skipTsc: true,
+        }),
+      ).rejects.toThrow(/duplicate datasource name 'mem'/);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('rejects a keyed-map datasources.json with a whitespace-only key', async () => {
+    const app = await bootstrap(ROOT_DS_EMPTY_KEY, CONFIG);
+    try {
+      const pipeline = await app.get<Pipeline>(
+        ContractsEngineBindings.PIPELINE,
+      );
+
+      await expect(
+        pipeline.run({
+          projectRoot: ROOT_DS_EMPTY_KEY,
+          config: {...CONFIG, schemas: [join(ROOT_DS_EMPTY_KEY, 'schemas')]},
+          emitFlags: {model: true},
+          skipTsc: true,
+        }),
+      ).rejects.toThrow(/keyed-map contains an empty key/);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it("rejects an array entry missing the required 'name' field (no silent drop)", async () => {
+    const app = await bootstrap(ROOT_DS_ALL_FILTERED, CONFIG);
+    try {
+      const pipeline = await app.get<Pipeline>(
+        ContractsEngineBindings.PIPELINE,
+      );
+
+      await expect(
+        pipeline.run({
+          projectRoot: ROOT_DS_ALL_FILTERED,
+          config: {
+            ...CONFIG,
+            schemas: [join(ROOT_DS_ALL_FILTERED, 'schemas')],
+          },
+          emitFlags: {model: true},
+          skipTsc: true,
+        }),
+      ).rejects.toThrow(/missing required string field 'name'/);
+    } finally {
+      await app.stop();
+    }
+  });
+});

@@ -1046,8 +1046,8 @@ function assertDatasourceDeclared(
       : '/dataSource';
   throw new ContractsValidationError(
     `stage 5: config '${config.$contractId}' references datasource ` +
-      `'${config.dataSource}' which is not declared in datasources.json. ` +
-      hint,
+      `'${config.dataSource}' which is not declared in datasources.json.\n` +
+      `  ${hint}`,
     {
       sourcePath,
       instancePath,
@@ -1436,20 +1436,79 @@ async function loadDatasources(
   projectRoot: string,
 ): Promise<DatasourceConfigJson[]> {
   const path = resolve(projectRoot, 'datasources.json');
+  let raw: string;
+  try {
+    raw = await readFile(path, 'utf8');
+  } catch (err) {
+    // ENOENT is benign — a contracts-only project legitimately ships no
+    // datasources, and stage 5's cross-validation will surface a clear
+    // error if any config still references one. Other I/O errors
+    // (EPERM, EISDIR, EMFILE, etc.) indicate a real problem reading the
+    // file the user authored; surface them with the OS message so the
+    // root cause isn't mis-attributed to "no datasources declared".
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw new ContractsValidationError(
+      `stage 5: failed to read datasources.json: ${(err as Error).message}`,
+      {sourcePath: path, instancePath: ''},
+      {cause: err},
+    );
+  }
   let json: unknown;
   try {
-    const raw = await readFile(path, 'utf8');
     json = JSON.parse(raw);
-  } catch {
-    return [];
-  }
-  if (Array.isArray(json)) {
-    return (json as readonly unknown[]).filter(
-      (entry): entry is DatasourceConfigJson =>
-        entry !== null &&
-        typeof entry === 'object' &&
-        typeof (entry as {name?: unknown}).name === 'string',
+  } catch (cause) {
+    throw new ContractsValidationError(
+      `stage 5: invalid JSON in datasources.json: ${(cause as Error).message}`,
+      {sourcePath: path, instancePath: ''},
+      {cause},
     );
+  }
+  const parsed = parseDatasourcesJson(json, path);
+  assertNoDuplicateDatasourceNames(parsed, path);
+  return parsed;
+}
+
+/**
+ * Normalise the parsed `datasources.json` document into a flat
+ * {@link DatasourceConfigJson}[]. Two on-disk layouts are accepted:
+ *
+ *   - Array form: each element must be an object with a `name` field
+ *     that's a non-empty string.
+ *   - Keyed-map form: each key (other than `$schema`) becomes the
+ *     entry's canonical `name`. The map key WINS over any `name` field
+ *     declared inside the value — same precedence as
+ *     `normaliseDatasources()` in the generator. Empty / whitespace-only
+ *     keys are rejected to avoid emitting a `.base.datasource.ts` file
+ *     with an empty / `.base.datasource.ts` filename.
+ *
+ * Malformed entries (non-object array members, string values in the
+ * keyed-map, empty names) are rejected with a typed error rather than
+ * silently dropped, so the user gets a clear stage-5 diagnostic instead
+ * of a downstream "datasource not declared" surprise.
+ */
+function parseDatasourcesJson(
+  json: unknown,
+  path: string,
+): DatasourceConfigJson[] {
+  if (Array.isArray(json)) {
+    const out: DatasourceConfigJson[] = [];
+    for (const [i, entry] of (json as readonly unknown[]).entries()) {
+      if (entry === null || typeof entry !== 'object') {
+        throw new ContractsValidationError(
+          `stage 5: datasources.json[${i}] is not an object`,
+          {sourcePath: path, instancePath: `/${i}`},
+        );
+      }
+      const name = (entry as {name?: unknown}).name;
+      if (typeof name !== 'string' || name.trim().length === 0) {
+        throw new ContractsValidationError(
+          `stage 5: datasources.json[${i}] missing required string field 'name'`,
+          {sourcePath: path, instancePath: `/${i}/name`},
+        );
+      }
+      out.push(entry as DatasourceConfigJson);
+    }
+    return out;
   }
   if (json !== null && typeof json === 'object') {
     const out: DatasourceConfigJson[] = [];
@@ -1457,11 +1516,22 @@ async function loadDatasources(
       json as Record<string, unknown>,
     )) {
       if (name === '$schema') continue;
-      if (value === null || typeof value !== 'object') continue;
+      if (name.trim().length === 0) {
+        throw new ContractsValidationError(
+          'stage 5: datasources.json keyed-map contains an empty key',
+          {sourcePath: path, instancePath: ''},
+        );
+      }
+      if (value === null || typeof value !== 'object') {
+        throw new ContractsValidationError(
+          `stage 5: datasources.json['${name}'] is not an object`,
+          {sourcePath: path, instancePath: `/${name}`},
+        );
+      }
       // Fold the map key in as the canonical `name`. If the entry
-      // already declares a different `name`, the map key wins — that's
-      // the same precedence `normaliseDatasources()` applies in the
-      // generator, so the engine's view stays in lock-step.
+      // already declares a different `name`, the map key wins — same
+      // precedence `normaliseDatasources()` applies in the generator,
+      // so the engine's view stays in lock-step.
       out.push({
         ...(value as DatasourceConfigJson),
         name,
@@ -1469,7 +1539,37 @@ async function loadDatasources(
     }
     return out;
   }
-  return [];
+  // Valid JSON but not an array or object — a string / number / null
+  // at the top level is a structural error worth surfacing rather than
+  // silently returning [].
+  throw new ContractsValidationError(
+    `stage 5: datasources.json must be a JSON array or object (got ${typeof json})`,
+    {sourcePath: path, instancePath: ''},
+  );
+}
+
+/**
+ * Reject a `datasources.json` set that declares the same `name` twice.
+ * Without this check, a duplicate would silently dedupe via the
+ * cross-validation `Set` and the generator would deterministically
+ * pick the last entry — pointing every `dataSource: '<name>'`
+ * reference at the wrong adapter with no diagnostic.
+ */
+function assertNoDuplicateDatasourceNames(
+  datasources: readonly DatasourceConfigJson[],
+  path: string,
+): void {
+  const seen = new Set<string>();
+  for (const ds of datasources) {
+    if (seen.has(ds.name)) {
+      throw new ContractsValidationError(
+        `stage 5: datasources.json declares duplicate datasource name ` +
+          `'${ds.name}'. Each datasource name must be unique.`,
+        {sourcePath: path, instancePath: ''},
+      );
+    }
+    seen.add(ds.name);
+  }
 }
 
 async function listConfigFiles(configsDir: string): Promise<string[]> {

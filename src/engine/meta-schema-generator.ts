@@ -66,6 +66,7 @@ export function buildModelConfigMetaSchema(
       },
       dataSource: {
         type: 'string',
+        minLength: 1,
         ...(datasourceNames.length > 0 ? {enum: datasourceNames} : {}),
       },
       public: {type: 'boolean'},
