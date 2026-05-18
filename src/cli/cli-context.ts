@@ -19,7 +19,11 @@ import {
   type ParseError,
 } from 'jsonc-parser';
 import {buildLoopbackConfigMetaSchema} from '../engine/meta-schema-generator';
-import {ContractsError, ContractsValidationError} from '../helpers';
+import {
+  ContractsError,
+  ContractsValidationError,
+  offsetToLineCol,
+} from '../helpers';
 import type {LoopbackConfigJson} from '../types';
 
 /**
@@ -191,7 +195,7 @@ function readConfig(path: string): LoopbackConfigJson {
   }) as LoopbackConfigJson;
   if (errors.length > 0) {
     const first = errors[0] as ParseError;
-    const {line, column} = offsetToLineColumn(raw, first.offset);
+    const {line, column} = offsetToLineCol(raw, first.offset);
     const kind = printParseErrorCode(first.error);
     const suffix =
       errors.length > 1 ? ` (+${errors.length - 1} more error(s))` : '';
@@ -213,30 +217,6 @@ function readConfig(path: string): LoopbackConfigJson {
     );
   }
   return parsed;
-}
-
-/**
- * Convert a byte offset into a 1-based `(line, column)` pair against the
- * raw JSONC source. Counts newlines verbatim — matches the convention
- * editors use for diagnostics. Clamps the offset to `[0, source.length]`
- * so a malformed `ParseError` cannot push the result negative.
- *
- * @internal
- */
-function offsetToLineColumn(
-  source: string,
-  offset: number,
-): {readonly line: number; readonly column: number} {
-  const clamped = Math.max(0, Math.min(offset, source.length));
-  let line = 1;
-  let lineStart = 0;
-  for (let i = 0; i < clamped; i += 1) {
-    if (source.charCodeAt(i) === 0x0a) {
-      line += 1;
-      lineStart = i + 1;
-    }
-  }
-  return {line, column: clamped - lineStart + 1};
 }
 
 /**

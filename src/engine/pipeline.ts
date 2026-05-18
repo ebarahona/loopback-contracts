@@ -14,6 +14,7 @@ import {
   ContractsPipelineError,
   ContractsSourceError,
   ContractsValidationError,
+  readDatasourcesDoc,
 } from '../helpers';
 import type {
   EmittedFile,
@@ -1326,10 +1327,24 @@ function formatAjvErrors(errors: ErrorObject[] | null | undefined): string {
         e.keyword === 'enum' &&
         Array.isArray(params['allowedValues'])
       ) {
-        const allowed = (params['allowedValues'] as readonly unknown[])
-          .map(v => JSON.stringify(v))
+        // Cap rendering at 8 entries so a future object-typed enum
+        // (or just an unusually large string enum) can't balloon the
+        // diagnostic block past readability. Short-circuit objects
+        // / arrays to a `[object]` placeholder for the same reason —
+        // today every meta-schema enum is `string[]`, but the
+        // formatter shouldn't assume that forever.
+        const allowed = params['allowedValues'] as readonly unknown[];
+        const head = allowed.slice(0, 8);
+        const rendered = head
+          .map(v =>
+            typeof v === 'object' && v !== null
+              ? '[object]'
+              : JSON.stringify(v),
+          )
           .join(', ');
-        suffix = ` (allowed: ${allowed})`;
+        const tail =
+          allowed.length > 8 ? `, …(+${allowed.length - 8} more)` : '';
+        suffix = ` (allowed: ${rendered}${tail})`;
       }
       return `  - ${path} ${e.message ?? ''}${suffix} [keyword=${e.keyword}]`;
     })
@@ -1682,11 +1697,22 @@ async function loadDiffStateCache(
  *     in as the entry's `name` field so the returned array shape is
  *     uniform across both layouts.
  *
- * Missing or unreadable `datasources.json` returns `[]`. A malformed
- * entry (non-object value, string value other than `$schema`) is also
- * dropped silently here — stage 5's meta-schema validation catches
- * shape-level problems with a richer error, so this loader stays a
- * simple parse-and-normalise pass.
+ * Missing `datasources.json` returns `[]`. Malformed JSONC (parse
+ * errors, non-object/non-array top level) throws
+ * {@link ContractsValidationError} via the shared
+ * {@link readDatasourcesDoc} helper — same diagnostic block the
+ * `lb-contracts ds` and `lb-contracts contract` surfaces emit, so
+ * users see one error message regardless of which command tripped the
+ * file first. A malformed entry inside an otherwise-valid document
+ * (non-object value, string value other than `$schema`) still surfaces
+ * later via stage 5's meta-schema validation.
+ *
+ * Sync vs async: the shared helper is sync (`readFileSync`). The
+ * per-run cost is a single file read off the hot loop, so the sync
+ * call is intentional — wrapping it in a thenable would only add noise.
+ * {@link loadRawDatasources} keeps its `async` signature so the two
+ * `await` call-sites in {@link Pipeline.stage5ValidateConfigs} stay
+ * unchanged.
  */
 async function loadDatasources(
   projectRoot: string,
@@ -1710,35 +1736,25 @@ async function loadDatasources(
  * array form. Without this split, the meta-schema's `oneOf` (array vs
  * keyed-map) would never see the keyed-map branch.
  *
- * Other I/O errors (EPERM, EISDIR, EMFILE, etc.) and JSON parse failures
- * surface as typed {@link ContractsValidationError}s so the root cause
- * isn't mis-attributed to "no datasources declared".
+ * Delegates the read + parse to the shared {@link readDatasourcesDoc}
+ * helper so the pipeline, `lb-contracts ds`, and `lb-contracts contract`
+ * all surface byte-identical diagnostics for a malformed
+ * `datasources.json` (JSONC-aware parser, line:column pointer, typed
+ * {@link ContractsValidationError}). Prior to this delegation the
+ * pipeline used `JSON.parse` and rejected trailing commas / `//`
+ * comments that the CLI surfaces happily accept — same input, two
+ * verdicts, depending on which command ran first.
+ *
+ * The helper is synchronous (`readFileSync`); see the rationale on
+ * {@link loadDatasources}. This function keeps its `async` signature
+ * so the two `await` call-sites stay unchanged.
  */
 async function loadRawDatasources(
   projectRoot: string,
 ): Promise<{readonly raw: unknown; readonly path: string} | undefined> {
   const path = resolve(projectRoot, 'datasources.json');
-  let text: string;
-  try {
-    text = await readFile(path, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw new ContractsValidationError(
-      `stage 5: failed to read datasources.json: ${(err as Error).message}`,
-      {sourcePath: path, instancePath: ''},
-      {cause: err},
-    );
-  }
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch (cause) {
-    throw new ContractsValidationError(
-      `stage 5: invalid JSON in datasources.json: ${(cause as Error).message}`,
-      {sourcePath: path, instancePath: ''},
-      {cause},
-    );
-  }
+  const raw = readDatasourcesDoc(path);
+  if (raw === undefined) return undefined;
   return {raw, path};
 }
 
@@ -1756,6 +1772,12 @@ async function loadRawDatasources(
  * pull in). Suffix captures from BOTH patterns are unioned into the
  * same `Set` so an adapter installed under either name surfaces in the
  * enum exactly once.
+ *
+ * Custom-scoped connectors (e.g. `@my-org/loopback-connector-*`) are
+ * intentionally out of scope — they don't follow the canonical LB4
+ * naming convention this discovery walks. Authors using custom scopes
+ * must hand-extend `_meta/datasources.schema.json` or pass
+ * `installedAdapters` directly to the meta-schema builder.
  *
  * Silent on every failure mode (missing file, unreadable file, malformed
  * JSON, non-object root) — adapter-enum hinting is an authoring nicety,

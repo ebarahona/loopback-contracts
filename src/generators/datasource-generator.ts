@@ -1,8 +1,6 @@
 import {BindingScope, injectable} from '@loopback/core';
-import {parse as parseJsonc} from 'jsonc-parser';
-import {readFileSync} from 'node:fs';
 import {join, posix} from 'node:path';
-import {assertNoTraversal, toKebab} from '../helpers';
+import {assertNoTraversal, readDatasourcesDoc, toKebab} from '../helpers';
 import type {
   EmittedFile,
   EmitterContext,
@@ -103,24 +101,17 @@ export class DatasourceGenerator implements ProjectionEmitter {
    * returns the full descriptor set in a single pass.
    *
    * Missing `datasources.json` is not an error: a contracts-only project
-   * legitimately ships no datasources. We swallow the read failure and
-   * return `[]`.
+   * legitimately ships no datasources. The shared `readDatasourcesDoc`
+   * helper returns `undefined` for that benign case; malformed or
+   * unreadable files throw `ContractsValidationError`, which we let
+   * propagate so the pipeline's stage-7 error path surfaces the uniform
+   * diagnostic block instead of swallowing it as "no datasources".
    */
   emit(ctx: EmitterContext): EmittedFile[] {
     const datasourcesPath = join(ctx.paths.root, 'datasources.json');
-    let datasources: DatasourcesFile;
-    try {
-      const raw = readFileSync(datasourcesPath, 'utf8');
-      datasources = parseJsonc(raw, [], {
-        allowTrailingComma: true,
-        disallowComments: false,
-      }) as DatasourcesFile;
-    } catch {
-      // No `datasources.json` (or unreadable) — project has no datasources
-      // to emit. Treat as a benign empty set; the engine will simply skip
-      // writing datasource files this run.
-      return [];
-    }
+    const doc = readDatasourcesDoc(datasourcesPath);
+    if (doc === undefined) return [];
+    const datasources = doc as DatasourcesFile;
 
     const genCtx: GeneratorContext = {
       registry: ctx.registry,

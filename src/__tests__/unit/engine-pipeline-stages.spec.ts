@@ -1,8 +1,8 @@
 import {Application, BindingScope} from '@loopback/core';
 import {randomBytes} from 'node:crypto';
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join, resolve} from 'node:path';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {ContractsComponent} from '../../contracts.component';
 import {
@@ -18,7 +18,11 @@ import {
   SourceResolverRegistry,
 } from '../../engine';
 import {ContractsEngineBindings} from '../../engine/tokens';
-import {ContractsPipelineError, ContractsValidationError} from '../../helpers';
+import {
+  ContractsCodegenError,
+  ContractsPipelineError,
+  ContractsValidationError,
+} from '../../helpers';
 import type {ImportMap, SchemaRegistry} from '../../interfaces';
 import {ContractsBindings} from '../../keys';
 import {
@@ -318,11 +322,81 @@ describe('Pipeline stage gates', () => {
     }
   });
 
-  // Stage 8 invokes `npx --no-install tsc --noEmit` against the project. In
-  // a tmpdir we cannot guarantee a resolvable `tsc` binary, so we skip rather
-  // than introduce a flaky environment dependency. The stage-8 success path
-  // is already exercised in the integration test via `skipTsc: true`.
-  it.skip('stage 8 returns tscOk: false for code with a type error', () => {
-    // Intentionally left blank — see comment above.
-  });
+  // Stage 8 invokes `npx --no-install tsc --noEmit` against the project. The
+  // success path is covered by the integration test's stage-8 gate; this
+  // covers the FAILURE path. The same symlink-the-plugin's-`node_modules`
+  // trick used in `pipeline-end-to-end.spec.ts` makes `tsc` resolvable in a
+  // tmpdir without depending on the host's global toolchain.
+  it('stage 8 throws ContractsCodegenError when tsc finds a type error', async () => {
+    const root = makeProject('stage8-tsc-failure');
+    mkdirSync(join(root, 'src'), {recursive: true});
+
+    // A minimal valid schema keeps stages 1-6 green. `emit: {}` means
+    // stage 7 is a no-op (no emitters run, no files written), so the
+    // only thing standing between this run and success is stage 8.
+    writeFileSync(
+      join(root, 'schemas', 'customer.schema.json'),
+      JSON.stringify({
+        $id: 'customer.v1',
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        properties: {id: {type: 'string'}},
+        required: ['id'],
+      }),
+      'utf8',
+    );
+
+    // Deliberate type error tsc will reject under `strict: true`.
+    writeFileSync(
+      join(root, 'src', 'broken.ts'),
+      `export const x: number = 'string';\n`,
+      'utf8',
+    );
+
+    writeFileSync(
+      join(root, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          module: 'commonjs',
+          strict: true,
+          target: 'ES2022',
+          skipLibCheck: true,
+          noEmit: true,
+          types: ['node'],
+        },
+        include: ['src/**/*'],
+        exclude: ['node_modules'],
+      }),
+      'utf8',
+    );
+
+    // Mirror the e2e gate test: symlink the plugin's own `node_modules`
+    // so `npx --no-install tsc` resolves without touching the network or
+    // the host toolchain.
+    const pluginRoot = resolve(__dirname, '..', '..', '..');
+    symlinkSync(
+      join(pluginRoot, 'node_modules'),
+      join(root, 'node_modules'),
+      'dir',
+    );
+
+    const config = defaultConfig({schemas: [join(root, 'schemas')]});
+    const app = await bootstrap(root, config);
+    try {
+      const pipeline = await app.get<Pipeline>(
+        ContractsEngineBindings.PIPELINE,
+      );
+      await expect(
+        pipeline.run({
+          projectRoot: root,
+          config,
+          emitFlags: {},
+          skipTsc: false,
+        }),
+      ).rejects.toBeInstanceOf(ContractsCodegenError);
+    } finally {
+      await app.stop();
+    }
+  }, // `npx tsc` cold start dominates wall time — match the e2e gate test.
+  120_000);
 });
