@@ -72,9 +72,21 @@ export function buildModelConfigMetaSchema(
       public: {type: 'boolean'},
       model: {
         type: 'object',
-        additionalProperties: true,
+        // Tightened in review finding 7 — typos like `idPropertty` now
+        // fail stage-5 validation instead of silently being ignored by
+        // the generator. The four keys listed below are the exact set
+        // read by `ModelGenerator.buildModelSettings` (see
+        // `src/generators/model-generator.ts`): `base` chooses the LB4
+        // base class, `strict`/`idProperty`/`hiddenProperties` are
+        // forwarded into the `@model({settings: {...}})` literal.
+        additionalProperties: false,
         properties: {
           base: {type: 'string', enum: [...MODEL_BASES]},
+          strict: {type: 'boolean'},
+          // `resolveIdProperty()` in `src/helpers/identifiers.ts` only
+          // requires a non-empty string; the generator does not enforce
+          // a JS-identifier regex, so the meta-schema doesn't either.
+          idProperty: {type: 'string', minLength: 1},
           hiddenProperties: {type: 'array', items: {type: 'string'}},
         },
       },
@@ -125,31 +137,69 @@ export function buildModelConfigMetaSchema(
  * from `node_modules` for LB4 connectors). When the list is empty, the
  * enum is omitted so authoring still works on a fresh project.
  *
+ * Two on-disk layouts are accepted via `oneOf`, mirroring
+ * `parseDatasourcesJson` in `src/engine/pipeline.ts`:
+ *
+ *   - **Array**: explicit `name` per entry — kept for back-compat and
+ *     hand-authored fixtures.
+ *   - **Keyed map** (preferred — what `lb-contracts ds` writes): each
+ *     map key is the canonical datasource name, the value carries
+ *     `adapter` and an optional `config`. A redundant `name` field on
+ *     the entry value is tolerated (the loader drops it in favour of
+ *     the map key) but the entry itself does NOT require `name`.
+ *
+ * Without the `oneOf` the editor flagged the keyed-map layout — the
+ * preferred form — as invalid. The `$id` is preserved so existing
+ * editor caches keep matching.
+ *
  * @internal
  */
 export function buildDatasourcesMetaSchema(
   installedAdapters: readonly string[] = [],
 ): JSONSchema {
   const adapters = [...new Set(installedAdapters)].sort();
+  const adapterSchema: JSONSchema = {
+    type: 'string',
+    ...(adapters.length > 0 ? {enum: adapters} : {}),
+  };
+  // Shared per-entry property bag. The array branch requires `name`
+  // (entries have no enclosing key); the keyed-map branch reuses the
+  // SAME property shape so a redundant `name` is allowed but never
+  // required.
+  const entryProperties: Record<string, JSONSchema> = {
+    $schema: {type: 'string'},
+    name: {type: 'string', minLength: 1},
+    adapter: adapterSchema,
+    config: {type: 'object', additionalProperties: true},
+  };
+  const arrayItemSchema: JSONSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['name', 'adapter'],
+    properties: entryProperties,
+  };
+  const keyedEntrySchema: JSONSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['adapter'],
+    properties: entryProperties,
+  };
   return {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $id: 'https://ebarahona.dev/loopback-contracts/_meta/datasources.schema.json',
     title: 'LoopBack 4 datasources.json (generated)',
-    type: 'array',
-    items: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['name', 'adapter'],
-      properties: {
-        $schema: {type: 'string'},
-        name: {type: 'string', minLength: 1},
-        adapter: {
-          type: 'string',
-          ...(adapters.length > 0 ? {enum: adapters} : {}),
-        },
-        config: {type: 'object', additionalProperties: true},
+    oneOf: [
+      // Array layout — original shape, kept for back-compat.
+      {type: 'array', items: arrayItemSchema},
+      // Keyed-map layout — what `lb4 ds` writes. `$schema` is allowed
+      // as a top-level sibling key (typed as string); every other key
+      // is a datasource name whose value follows the entry schema.
+      {
+        type: 'object',
+        properties: {$schema: {type: 'string'}},
+        additionalProperties: keyedEntrySchema,
       },
-    },
+    ],
   };
 }
 

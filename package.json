@@ -65,6 +65,8 @@
   "peerDependencies": {
     "@loopback/core": ">=7.0.0 <8.0.0",
     "@loopback/metadata": ">=8.0.0 <9.0.0",
+    "@loopback/repository": ">=8.0.0 <9.0.0",
+    "@loopback/rest": ">=15.0.0 <16.0.0",
     "cloudevents": ">=10.0.0 <11.0.0",
     "json-schema-faker": "^0.5.6",
     "json-schema-to-typescript": ">=15.0.0 <16.0.0",

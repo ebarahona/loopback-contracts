@@ -29,6 +29,7 @@ import {
   applyEdits,
   format as jsoncFormat,
   modify as jsoncModify,
+  parse as parseJsonc,
   type FormattingOptions,
 } from 'jsonc-parser';
 import {createCliContext} from '../cli-context';
@@ -142,6 +143,7 @@ export async function runContract(opts: RunContractOptions): Promise<number> {
     const wizard = await runManualWizard({
       kebabName,
       projectRoot: opts.projectRoot,
+      schemasDir: paths.schemasDir,
     });
 
     const schemaDoc = buildSchemaDocument({
@@ -312,6 +314,7 @@ async function runExtensionSource(
 async function runManualWizard(opts: {
   kebabName: string;
   projectRoot: string;
+  schemasDir: string;
 }): Promise<WizardAnswers> {
   const id = await text({
     message: 'ID for this contract?',
@@ -325,7 +328,7 @@ async function runManualWizard(opts: {
     defaultValue: '',
   });
 
-  const knownContractIds = listKnownContractIds(opts.projectRoot);
+  const knownContractIds = listKnownContractIds(opts.schemasDir);
   const properties: AuthoredProperty[] = [];
 
   // Properties loop — the first iteration's `confirm` defaults to true so
@@ -608,7 +611,10 @@ function readDatasourceNames(projectRoot: string): readonly string[] {
   if (!existsSync(path)) return [];
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(path, 'utf8'));
+    parsed = parseJsonc(readFileSync(path, 'utf8'), [], {
+      allowTrailingComma: true,
+      disallowComments: false,
+    });
   } catch {
     return [];
   }
@@ -646,21 +652,24 @@ function readDatasourceNames(projectRoot: string): readonly string[] {
 
 /**
  * Enumerate `$id` values from every authored schema under the project's
- * `schemas/` directory so the `ref` prompt can offer real targets without
- * booting the full engine. Best-effort: a fresh project (no schemas yet)
- * yields an empty list.
+ * configured schemas directory so the `ref` prompt can offer real targets
+ * without booting the full engine. Best-effort: a fresh project (no schemas
+ * yet) yields an empty list.
+ *
+ * `schemasDir` is the absolute, already-resolved path produced by
+ * {@link resolvePaths} — honours the user's `schemasDir` setting in
+ * `loopback.config.json` rather than assuming the default `./schemas`.
  */
-function listKnownContractIds(projectRoot: string): readonly string[] {
-  const candidateDir = resolve(projectRoot, 'schemas');
-  if (!existsSync(candidateDir)) return [];
+function listKnownContractIds(schemasDir: string): readonly string[] {
+  if (!existsSync(schemasDir)) return [];
   try {
-    const entries = readdirSync(candidateDir, {withFileTypes: true});
+    const entries = readdirSync(schemasDir, {withFileTypes: true});
     const ids: string[] = [];
     for (const entry of entries) {
       if (!entry.isFile()) continue;
       if (!entry.name.endsWith('.schema.json')) continue;
       try {
-        const raw = readFileSync(resolve(candidateDir, entry.name), 'utf8');
+        const raw = readFileSync(resolve(schemasDir, entry.name), 'utf8');
         const doc: unknown = JSON.parse(raw);
         if (
           doc !== null &&

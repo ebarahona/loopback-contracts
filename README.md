@@ -58,16 +58,16 @@ The engine prints a clear actionable error pointing at the missing package when 
 
 ```bash
 # 1. Initialize the project (writes loopback.config.json)
-lb4 init
+lb-contracts init
 
 # 2. Scaffold a contract (writes both JSON files in one session)
-lb4 contract customer
+lb-contracts contract customer
 
 # 3. Generate everything LB4 needs
-lb4 gen
+lb-contracts gen
 ```
 
-After `lb4 gen`, a default project looks like this:
+After `lb-contracts gen`, a default project looks like this:
 
 ```
 my-app/
@@ -80,7 +80,7 @@ my-app/
 ├── _meta/                            # GENERATED (project-specific enums)
 │   ├── model-config.schema.json
 │   ├── datasources.schema.json
-│   └── emitter-config.schema.json
+│   └── emitter.schema.json
 └── src/
     ├── models/
     │   ├── customer.base.model.ts    # GENERATED (regen-always)
@@ -96,34 +96,34 @@ my-app/
         └── index.ts
 ```
 
-Six files per contract maximum, plus three barrels per directory. Extension files (no `.base.` suffix) are only emitted by `lb4 override <kind> <contract>`, not speculatively.
+Six files per contract maximum, plus three barrels per directory. Extension files (no `.base.` suffix) are only emitted by `lb-contracts override <kind> <contract>`, not speculatively.
 
 Day-2 edits happen in your editor. The `$schema` reference at the top of every authored JSON file resolves to the regenerated meta-schemas, giving VS Code autocomplete + inline validation + hover docs for every valid datasource, contract id, and relation kind. The CLI is for the cold start; the editor is for everything after.
 
 ## CLI command reference
 
-Fifteen commands, all at v1.0. Four scaffolders (`lb4 init`, `lb4 contract`, `lb4 ds`, `lb4 override`) write once and refuse to overwrite; the rest regenerate idempotently.
+Fifteen commands, all at v1.0. Four scaffolders (`lb-contracts init`, `lb-contracts contract`, `lb-contracts ds`, `lb-contracts override`) write once and refuse to overwrite; the rest regenerate idempotently.
 
-| Command                             | What it does                                                                                                          | If target exists                                                   |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `lb4 init`                          | Scaffolds `loopback.config.json` (interactive: dirs, remote sources, validator, default sidecar emissions)            | Errors. Hand-edit the file to change settings.                     |
-| `lb4 contract <name>`               | Scaffolds `schemas/<name>.schema.json` + `configs/<name>.config.json` (interactive)                                   | Errors. Hand-edit JSON to revise; `lb4 override` for TS extension. |
-| `lb4 ds <name> --adapter <kind>`    | Scaffolds an entry in `datasources.json` (creates the file if missing)                                                | Errors on duplicate entry. Hand-edit `datasources.json` to modify. |
-| `lb4 override <kind> <contract>`    | Scaffolds an extension stub (`src/<dir>/<contract>.<kind>.ts`)                                                        | Errors — already overridden. Delete and re-run to start fresh.     |
-| `lb4 gen`                           | Regenerates `_meta/*.schema.json` + all `.base.*` TS files                                                            | Idempotent. Never touches authored JSON or extension TS.           |
-| `lb4 gen --emit-zod`                | `gen` + emits `*.zod.ts` per schema                                                                                   | Sidecars regenerate with bases.                                    |
-| `lb4 gen --emit-types`              | `gen` + emits `*.types.ts` (pure TS interface) per schema                                                             | Sidecars regenerate with bases.                                    |
-| `lb4 gen --emit-graphql`            | `gen` + emits `*.graphql.ts` (code-first decorators); optional `--emit-graphql-sdl` adds `*.graphql` SDL text         | Sidecars regenerate with bases.                                    |
-| `lb4 gen --emit-cloudevents`        | `gen` + emits `*.cloudevents.ts` (typed `CloudEvent<T>` wrappers)                                                     | Sidecars regenerate with bases.                                    |
-| `lb4 gen --emit-asyncapi`           | `gen` + emits `*.asyncapi.yaml` (AsyncAPI 3.0 message-catalog fragments)                                              | Sidecars regenerate with bases.                                    |
-| `lb4 gen --emit-proto`              | `gen` + emits `*.proto` (Protocol Buffers schema)                                                                     | Sidecars regenerate with bases.                                    |
-| `lb4 gen --emit-avro`               | `gen` + emits `*.avsc` (Avro schema)                                                                                  | Sidecars regenerate with bases.                                    |
-| `lb4 gen --emit-openapi-components` | `gen` + emits `*.openapi-components.yaml` (OAS 3.x components fragment)                                               | Sidecars regenerate with bases.                                    |
-| `lb4 gen --emit-mock-data`          | `gen` + emits `*.mock.json` (one valid sample per schema via `json-schema-faker`)                                     | Sidecars regenerate with bases.                                    |
-| `lb4 gen --watch` (alias `lb4 dev`) | Continuous regen via `chokidar`; respects whichever sidecar flags are set                                             | Re-runs the right pipeline phase per file kind.                    |
-| `lb4 validate`                      | Read-only Ajv pass over all authored files against `_meta/*.schema.json`; reports errors with `instancePath` pointers | No writes.                                                         |
+| Command                                               | What it does                                                                                                          | If target exists                                                            |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `lb-contracts init`                                   | Scaffolds `loopback.config.json` (interactive: dirs, remote sources, validator, default sidecar emissions)            | Errors. Hand-edit the file to change settings.                              |
+| `lb-contracts contract <name>`                        | Scaffolds `schemas/<name>.schema.json` + `configs/<name>.config.json` (interactive)                                   | Errors. Hand-edit JSON to revise; `lb-contracts override` for TS extension. |
+| `lb-contracts ds <name> --adapter <kind>`             | Scaffolds an entry in `datasources.json` (creates the file if missing)                                                | Errors on duplicate entry. Hand-edit `datasources.json` to modify.          |
+| `lb-contracts override <kind> <contract>`             | Scaffolds an extension stub (`src/<dir>/<contract>.<kind>.ts`)                                                        | Errors — already overridden. Delete and re-run to start fresh.              |
+| `lb-contracts gen`                                    | Regenerates `_meta/*.schema.json` + all `.base.*` TS files                                                            | Idempotent. Never touches authored JSON or extension TS.                    |
+| `lb-contracts gen --emit-zod`                         | `gen` + emits `*.zod.ts` per schema                                                                                   | Sidecars regenerate with bases.                                             |
+| `lb-contracts gen --emit-types`                       | `gen` + emits `*.types.ts` (pure TS interface) per schema                                                             | Sidecars regenerate with bases.                                             |
+| `lb-contracts gen --emit-graphql`                     | `gen` + emits `*.graphql.ts` (code-first decorators); optional `--emit-graphql-sdl` adds `*.graphql` SDL text         | Sidecars regenerate with bases.                                             |
+| `lb-contracts gen --emit-cloudevents`                 | `gen` + emits `*.cloudevents.ts` (typed `CloudEvent<T>` wrappers)                                                     | Sidecars regenerate with bases.                                             |
+| `lb-contracts gen --emit-asyncapi`                    | `gen` + emits `*.asyncapi.yaml` (AsyncAPI 3.0 message-catalog fragments)                                              | Sidecars regenerate with bases.                                             |
+| `lb-contracts gen --emit-proto`                       | `gen` + emits `*.proto` (Protocol Buffers schema)                                                                     | Sidecars regenerate with bases.                                             |
+| `lb-contracts gen --emit-avro`                        | `gen` + emits `*.avsc` (Avro schema)                                                                                  | Sidecars regenerate with bases.                                             |
+| `lb-contracts gen --emit-openapi-components`          | `gen` + emits `*.openapi-components.yaml` (OAS 3.x components fragment)                                               | Sidecars regenerate with bases.                                             |
+| `lb-contracts gen --emit-mock-data`                   | `gen` + emits `*.mock.json` (one valid sample per schema via `json-schema-faker`)                                     | Sidecars regenerate with bases.                                             |
+| `lb-contracts gen --watch` (alias `lb-contracts dev`) | Continuous regen via `chokidar`; respects whichever sidecar flags are set                                             | Re-runs the right pipeline phase per file kind.                             |
+| `lb-contracts validate`                               | Read-only Ajv pass over all authored files against `_meta/*.schema.json`; reports errors with `instancePath` pointers | No writes.                                                                  |
 
-Every emit flag has a matching `loopback.config.json` setting (`"emit": {"zod": true, "graphql": true, ...}`) so the flag becomes the default for every `lb4 gen` invocation without typing it.
+Every emit flag has a matching `loopback.config.json` setting (`"emit": {"zod": true, "graphql": true, ...}`) so the flag becomes the default for every `lb-contracts gen` invocation without typing it.
 
 `loopback-contracts` works directly with JSON Schema only — it does not import from other formats. Bringing schemas in from Zod / OpenAPI / WSDL / Avro / proto / GraphQL SDL / AsyncAPI / live databases is the job of [`@ebarahona/loopback-contracts-import`](https://github.com/ebarahona/loopback-contracts-import) (`lb4 import-zod`, `lb4 import-openapi`, `lb4 import-wsdl`, etc.); its commands land schemas in `schemas/*.schema.json` where `loopback-contracts` then consumes them.
 
@@ -133,23 +133,23 @@ Authored vs generated, made explicit. The `.base.` suffix is the only discrimina
 
 ```
 my-app/
-├── loopback.config.json              # AUTHORED (lb4 init, then hand-edit)
-├── datasources.json                  # AUTHORED (lb4 ds + hand-edit)
-├── schemas/                          # AUTHORED (lb4 contract + hand-edit)
+├── loopback.config.json              # AUTHORED (lb-contracts init, then hand-edit)
+├── datasources.json                  # AUTHORED (lb-contracts ds + hand-edit)
+├── schemas/                          # AUTHORED (lb-contracts contract + hand-edit)
 │   └── customer.schema.json
-├── configs/                          # AUTHORED (lb4 contract + hand-edit)
+├── configs/                          # AUTHORED (lb-contracts contract + hand-edit)
 │   └── customer.config.json
 ├── _meta/                            # GENERATED — gitignore'd
 │   ├── model-config.schema.json
 │   ├── datasources.schema.json
-│   └── emitter-config.schema.json
+│   └── emitter.schema.json
 ├── .loopback/cache/                  # GENERATED — gitignore'd (remote source cache)
 ├── emitters/                         # AUTHORED (manifest+template emitters — optional)
 │   └── audit-envelope.emitter.json
 └── src/
     ├── models/
-    │   ├── customer.base.model.ts            # REGEN — every lb4 gen
-    │   ├── customer.model.ts                 # ONCE  — only on lb4 override
+    │   ├── customer.base.model.ts            # REGEN — every lb-contracts gen
+    │   ├── customer.model.ts                 # ONCE  — only on lb-contracts override
     │   ├── customer.zod.ts                   # REGEN — --emit-zod
     │   ├── customer.types.ts                 # REGEN — --emit-types
     │   ├── customer.graphql.ts               # REGEN — --emit-graphql
@@ -162,23 +162,23 @@ my-app/
     │   └── index.ts                          # REGEN — barrel
     ├── repositories/
     │   ├── customer.base.repository.ts       # REGEN
-    │   ├── customer.repository.ts            # ONCE  — only on lb4 override
+    │   ├── customer.repository.ts            # ONCE  — only on lb-contracts override
     │   └── index.ts
     ├── controllers/
     │   ├── customer.base.controller.ts       # REGEN
-    │   ├── customer.controller.ts            # ONCE  — only on lb4 override
+    │   ├── customer.controller.ts            # ONCE  — only on lb-contracts override
     │   └── index.ts
     └── datasources/
         ├── primary.base.datasource.ts        # REGEN
-        ├── primary.datasource.ts             # ONCE  — only on lb4 override
+        ├── primary.datasource.ts             # ONCE  — only on lb-contracts override
         └── index.ts
 ```
 
 Rules at a glance:
 
 - **Authored files** (`schemas/`, `configs/`, `datasources.json`, `loopback.config.json`, `emitters/`) — scaffold-once, refuse-to-overwrite. The CLI errors on duplicate; day-2 edits are hand-edits in your editor.
-- **`.base.*` files** — regen-always. The engine overwrites them on every `lb4 gen`. Never hand-edit.
-- **Extension files** (no `.base.` suffix) — scaffold-once via `lb4 override`, then owned by the user. The engine refuses to overwrite them after the first emit.
+- **`.base.*` files** — regen-always. The engine overwrites them on every `lb-contracts gen`. Never hand-edit.
+- **Extension files** (no `.base.` suffix) — scaffold-once via `lb-contracts override`, then owned by the user. The engine refuses to overwrite them after the first emit.
 - **`_meta/`** — always generated, never committed. In `.gitignore`.
 - **`.loopback/cache/`** — always generated, never committed. In `.gitignore`.
 
@@ -198,7 +198,7 @@ Nine sidecar formats, all opt-in, all v1.0. Off by default. Documentation of the
 | `--emit-openapi-components` | `*.openapi-components.yaml`                              | Mechanical       | OAS 3.x `components.schemas` mounted verbatim.                              |
 | `--emit-mock-data`          | `*.mock.json`                                            | Convenience      | One valid sample per schema via `json-schema-faker`.                        |
 
-Every flag has a `loopback.config.json` counterpart so the project's default emission set is configured once and reused on every `lb4 gen`.
+Every flag has a `loopback.config.json` counterpart so the project's default emission set is configured once and reused on every `lb-contracts gen`.
 
 ## Schema sources
 
@@ -216,7 +216,7 @@ Source specs are configured in `loopback.config.json` under the `sources` array;
 
 ## 8-stage validation pipeline
 
-Every `lb4 gen` invocation walks the same eight stages in order. Failure at any stage halts the run with an actionable error pointing at the offending file and JSON pointer. The stage labels below match the `stage` field surfaced on thrown `ContractsPipelineError`s (e.g. `source-fetch`, `schema-validation`, `backward-compat-diff`) so a CI failure is greppable straight back to this list.
+Every `lb-contracts gen` invocation walks the same eight stages in order. Failure at any stage halts the run with an actionable error pointing at the offending file and JSON pointer. The stage labels below match the `stage` field surfaced on thrown `ContractsPipelineError`s (e.g. `source-fetch`, `schema-validation`, `backward-compat-diff`) so a CI failure is greppable straight back to this list.
 
 1. **Source fetch.** Resolve every source spec in `loopback.config.json` via its `SOURCE_TAG` resolver; download remote schemas into `.loopback/cache/` (with content-addressed caching); union the result into the registry.
 2. **Schema validation.** Ajv-validates every fetched schema against the JSON Schema 2020-12 meta-schema; requires a non-empty top-level `$id`. Catches malformed schemas and `$id`-less documents before any other stage sees them.
@@ -233,16 +233,16 @@ Every `lb4 gen` invocation walks the same eight stages in order. Failure at any 
 
 Six extension-point tags. All stable at v1.0. Plugins register bindings under the appropriate tag and the engine resolves them via LB4's native `@extensions.list({tag: ...})` mechanism — the same pattern `@loopback/authentication` uses for strategies and `@loopback/boot` uses for booters.
 
-| Tag                           | What it extends                                                                                                                             |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EMITTER_TAG`                 | Add a new `ProjectionEmitter` for a not-yet-covered output format. CLI auto-accepts `--emit-<kind>`; `lb4 init` auto-shows the option.      |
-| `SOURCE_TAG`                  | The four built-in source kinds (`local`, `npm:`, `git+https`, `https`) all bind under this tag.                                             |
-| `SOURCE_EXTENSION_TAG`        | Contribute a new source kind (`s3://`, `oci://`, etc.) without touching the built-in resolvers.                                             |
-| `EXTENSION_KEYWORD_TAG`       | Register a handler for an `x-*` keyword in source schemas (e.g. `x-graphql`, `x-emit-skip`). The engine routes the keyword to your handler. |
-| `META_SCHEMA_CONTRIBUTOR_TAG` | Contribute additional enums to the generated `_meta/*.schema.json` files (e.g. plugin-specific adapter kinds, valid emitter options).       |
-| `VALIDATOR_TAG`               | Register additional Ajv formats (`phone`, `objectid`, org-internal formats) and keywords used by source schemas.                            |
+| Tag                           | What it extends                                                                                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EMITTER_TAG`                 | Add a new `ProjectionEmitter` for a not-yet-covered output format. CLI auto-accepts `--emit-<kind>`; `lb-contracts init` auto-shows the option. |
+| `SOURCE_TAG`                  | The four built-in source kinds (`local`, `npm:`, `git+https`, `https`) all bind under this tag.                                                 |
+| `SOURCE_EXTENSION_TAG`        | Contribute a new source kind (`s3://`, `oci://`, etc.) without touching the built-in resolvers.                                                 |
+| `EXTENSION_KEYWORD_TAG`       | Register a handler for an `x-*` keyword in source schemas (e.g. `x-graphql`, `x-emit-skip`). The engine routes the keyword to your handler.     |
+| `META_SCHEMA_CONTRIBUTOR_TAG` | Contribute additional enums to the generated `_meta/*.schema.json` files (e.g. plugin-specific adapter kinds, valid emitter options).           |
+| `VALIDATOR_TAG`               | Register additional Ajv formats (`phone`, `objectid`, org-internal formats) and keywords used by source schemas.                                |
 
-Auto-integration is the architectural guarantee: when an emitter binding appears under `EMITTER_TAG`, the CLI flag parser, `lb4 init` prompts, and meta-schema generator all pick it up automatically. No emitter author edits the CLI, the prompt machinery, or the meta-schema generator.
+Auto-integration is the architectural guarantee: when an emitter binding appears under `EMITTER_TAG`, the CLI flag parser, `lb-contracts init` prompts, and meta-schema generator all pick it up automatically. No emitter author edits the CLI, the prompt machinery, or the meta-schema generator.
 
 Full reference (interface contracts, lifecycle, versioning policy, comprehensive examples for both contribution paths): [`contracts-extensibility.md`](https://github.com/ebarahona/loopback-plugins/blob/main/docs/contracts-extensibility.md).
 

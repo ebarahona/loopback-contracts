@@ -11,12 +11,15 @@
 
 import {existsSync, readFileSync} from 'node:fs';
 import {dirname, resolve} from 'node:path';
+import type {ErrorObject, ValidateFunction} from 'ajv';
+import Ajv2020 from 'ajv/dist/2020';
 import {
   parse as parseJsonc,
   printParseErrorCode,
   type ParseError,
 } from 'jsonc-parser';
-import {ContractsError} from '../helpers';
+import {buildLoopbackConfigMetaSchema} from '../engine/meta-schema-generator';
+import {ContractsError, ContractsValidationError} from '../helpers';
 import type {LoopbackConfigJson} from '../types';
 
 /**
@@ -132,7 +135,50 @@ function findProjectRoot(start: string): string | undefined {
 }
 
 /**
- * Read and JSONC-parse `loopback.config.json` at the given path.
+ * Lazily-compiled validator for `loopback.config.json` shape. The
+ * meta-schema is identical across calls (it does not depend on the
+ * caller's project state), so compiling it once per process keeps
+ * subcommand startup fast.
+ *
+ * Real emitter-kind discovery in the CLI bootstrap is out of scope for
+ * this fix — passing `[]` keeps the `emit.*` enum permissive, matching
+ * the existing engine fallback when no installed-kinds list is supplied.
+ *
+ * @internal
+ */
+let cachedConfigValidator: ValidateFunction | undefined;
+function getConfigValidator(): ValidateFunction {
+  if (cachedConfigValidator === undefined) {
+    const ajv = new Ajv2020({strict: false, allErrors: true});
+    cachedConfigValidator = ajv.compile(buildLoopbackConfigMetaSchema([]));
+  }
+  return cachedConfigValidator;
+}
+
+/**
+ * Render Ajv `ErrorObject`s as a multi-line bullet list naming each
+ * offending field. Mirrors the format used elsewhere in the engine so
+ * config-shape diagnostics read identically whether they surface from
+ * the pipeline or from the CLI bootstrap.
+ *
+ * @internal
+ */
+function formatErrors(errors: ErrorObject[] | null | undefined): string {
+  if (!errors || errors.length === 0) return '  (no error details)';
+  return errors
+    .map(e => {
+      const path = e.instancePath.length === 0 ? '<root>' : e.instancePath;
+      return `  - ${path} ${e.message ?? ''} [keyword=${e.keyword}]`;
+    })
+    .join('\n');
+}
+
+/**
+ * Read and JSONC-parse `loopback.config.json` at the given path, then
+ * meta-schema-validate the result. The Ajv pass catches misspelled
+ * emitter keys (`emit.zodd`), invalid `validator` values, malformed
+ * `schemas` arrays, and bad import settings at the CLI boundary —
+ * before any downstream consumer can act on the bad shape.
  *
  * @internal
  */
@@ -153,6 +199,17 @@ function readConfig(path: string): LoopbackConfigJson {
       'CONTRACTS_CLI_CONFIG_INVALID',
       `JSONC parse error at line ${line}, col ${column}: ${kind} ` +
         `(${path})${suffix}`,
+    );
+  }
+  const validate = getConfigValidator();
+  if (!validate(parsed)) {
+    const first = validate.errors?.[0];
+    const instancePath = first?.instancePath ?? '';
+    const field = instancePath.length === 0 ? '<root>' : instancePath;
+    throw new ContractsValidationError(
+      `loopback.config.json at ${path} failed meta-schema validation ` +
+        `(first invalid field: ${field}):\n${formatErrors(validate.errors)}`,
+      {sourcePath: path, instancePath},
     );
   }
   return parsed;

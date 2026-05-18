@@ -968,7 +968,14 @@ describe('LB4-idiom emitter path — datasources.json structural validation', ()
           emitFlags: {model: true},
           skipTsc: true,
         }),
-      ).rejects.toThrow(/missing required string field 'name'/);
+        // Post-Wave-2: the new datasources.json meta-schema validation
+        // (buildDatasourcesMetaSchema with oneOf array+keyed-map) catches
+        // the missing `name` field BEFORE the parser-level normalisation
+        // runs. The error message now comes from Ajv via formatAjvErrors
+        // instead of the parser's hand-written "missing required string
+        // field" diagnostic — both reject the same input, the wording
+        // just shifted to the canonical layer.
+      ).rejects.toThrow(/required property 'name'/);
     } finally {
       await app.stop();
     }

@@ -1,4 +1,6 @@
 import {BindingScope, inject, injectable} from '@loopback/core';
+import Ajv2020 from 'ajv/dist/2020';
+import type {ErrorObject, ValidateFunction} from 'ajv';
 import {ContractsCodegenError, ContractsPeerDepMissingError} from '../helpers';
 
 // `json-schema-traverse` is a CommonJS module published with `export =`.
@@ -110,6 +112,19 @@ export class EmitterRunner {
     private readonly configs: ConfigRegistry,
   ) {}
 
+  // One compiled validator per emitter `kind` for the lifetime of this
+  // runner instance — mirrors the cached-Ajv sidecar pattern (cycle 3) so
+  // we pay the schema-compilation cost exactly once per emitter regardless
+  // of how many schemas the pipeline projects. Built-in emitters self-
+  // validate via their own caches; this runner-level layer is the contract
+  // enforcement promised in `ProjectionEmitter.perSchemaOptionsSchema`'s
+  // JSDoc and is what protects third-party emitters that ship without
+  // their own validation.
+  private readonly perEmitterOptionsValidators = new Map<
+    string,
+    ValidateFunction
+  >();
+
   /**
    * Emit every enabled emitter against every supplied schema and return the
    * flat list of file descriptors. Does not write to disk — that is the
@@ -181,6 +196,30 @@ export class EmitterRunner {
         const before = this.reporter.entries().length;
         const context = this.buildContext(emitter, schema);
 
+        // Runner-level enforcement of `ProjectionEmitter.perSchemaOptionsSchema`.
+        // Runs BEFORE `emit()` so a malformed `x-<kind>` block fails fast with a
+        // typed error naming the emitter kind + schema $id — without it, a
+        // third-party emitter that ships without its own validation would
+        // silently accept garbage options. Built-in sidecars still self-
+        // validate downstream (redundant but same accept/reject set).
+        const validator = this.getOptionsValidator(emitter);
+        if (validator !== undefined && context.options !== undefined) {
+          const ok = validator(context.options);
+          if (!ok) {
+            const schemaId =
+              typeof schema.$id === 'string' ? schema.$id : '<unknown>';
+            throw new ContractsCodegenError(
+              `emitter '${emitter.kind}' rejected x-${emitter.kind} options ` +
+                `on schema '${schemaId}': ${formatAjvErrorsInline(validator.errors)}`,
+              {
+                emitterKind: emitter.kind,
+                schemaId,
+                outputPath: '<options-validation>',
+              },
+            );
+          }
+        }
+
         let produced: EmittedFile[];
         try {
           // Emitters may return either `EmittedFile[]` or `Promise<EmittedFile[]>`
@@ -204,6 +243,23 @@ export class EmitterRunner {
     }
 
     return Object.freeze(output);
+  }
+
+  // Lazily compile (and cache) the per-schema options validator for an
+  // emitter. Returns `undefined` when the emitter declares no
+  // `perSchemaOptionsSchema` (interface contract: accept any options).
+  // Mirrors the Ajv config used by `pipeline.ts` so the runner-level layer
+  // is configured identically to stage-2 schema validation.
+  private getOptionsValidator(
+    emitter: ProjectionEmitter,
+  ): ValidateFunction | undefined {
+    if (emitter.perSchemaOptionsSchema === undefined) return undefined;
+    const cached = this.perEmitterOptionsValidators.get(emitter.kind);
+    if (cached !== undefined) return cached;
+    const ajv = new Ajv2020({strict: false, allErrors: true});
+    const validator = ajv.compile(emitter.perSchemaOptionsSchema);
+    this.perEmitterOptionsValidators.set(emitter.kind, validator);
+    return validator;
   }
 
   // Build the per-call EmitterContext. Pulled per (emitter, schema) so each
@@ -452,4 +508,16 @@ function detectMissingPeerDep(
 // `pkg.with.dots` match literally.
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Compact one-line rendering of Ajv `errors`. Each entry becomes
+// `<instancePath>: <message>`, joined with `; `. Kept private to the
+// runner so the runner doesn't take a dependency on pipeline.ts.
+function formatAjvErrorsInline(
+  errors: readonly ErrorObject[] | null | undefined,
+): string {
+  if (errors === null || errors === undefined || errors.length === 0) {
+    return '(no Ajv errors reported)';
+  }
+  return errors.map(e => `${e.instancePath}: ${e.message ?? ''}`).join('; ');
 }

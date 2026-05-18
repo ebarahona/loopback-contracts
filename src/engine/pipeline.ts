@@ -30,6 +30,7 @@ import type {
 import {EmitterRegistry} from './emitter-registry';
 import {EmitterRunner} from './emitter-runner';
 import {FileWriter} from './file-writer';
+import {BarrelGenerator} from '../generators/barrel-generator';
 import {InMemoryConfigRegistry} from './config-registry';
 import {InMemoryLossyReporter} from './lossy-reporter';
 import {ModuleFormatTransformer} from './module-format-transformer';
@@ -170,6 +171,15 @@ export class Pipeline {
     private readonly lossy: InMemoryLossyReporter,
     @inject(ContractsBindings.CONFIG_REGISTRY)
     private readonly configs: InMemoryConfigRegistry,
+    // `BarrelGenerator` is contributed by `ContractsComponent` via
+    // `createBindingFromClass(BarrelGenerator)`, which lands it under
+    // the LB4 default `classes.<Name>` namespace (see
+    // `DEFAULT_TYPE_NAMESPACES` in `@loopback/context`'s
+    // `binding-inspector`). Inject by the string key rather than the
+    // class itself so we stay in lock-step with the component wiring
+    // and never create a second sibling binding.
+    @inject('classes.BarrelGenerator')
+    private readonly barrels: BarrelGenerator,
   ) {}
 
   /**
@@ -597,6 +607,36 @@ export class Pipeline {
   private async stage5ValidateConfigs(
     opts: PipelineRunOptions,
   ): Promise<readonly DatasourceConfigJson[]> {
+    // Load the raw `datasources.json` BEFORE normalisation so the
+    // meta-schema's `oneOf` (array form vs keyed-map form) sees the
+    // user's input shape rather than the post-normalise flat array.
+    // ENOENT remains benign — `loadRawDatasources` returns `undefined`
+    // when the file does not exist, and we skip meta-schema validation
+    // for that case. Other I/O errors throw a `ContractsValidationError`
+    // upstream, so reaching this point with a defined `rawDatasources`
+    // means the file is on disk and parsed.
+    const rawDatasources = await loadRawDatasources(opts.projectRoot);
+    if (rawDatasources !== undefined) {
+      // Compile via the engine's canonical compile-fresh helper so the
+      // watch-mode rerun semantics (Ajv key-eviction by `$id`) hold —
+      // see `compileFresh()` for the invariant. `installedAdapters` is
+      // `[]` for now; node_modules-based adapter discovery is out of
+      // scope and the meta-schema omits the `adapter` enum when the
+      // list is empty (`buildDatasourcesMetaSchema()` handles that).
+      const datasourcesMeta = this.compileFresh(
+        buildDatasourcesMetaSchema([]) as JSONSchema,
+      );
+      const ok = datasourcesMeta(rawDatasources.raw);
+      if (!ok) {
+        throw new ContractsValidationError(
+          `stage 5: datasources.json failed meta-schema validation:\n${formatAjvErrors(datasourcesMeta.errors)}`,
+          {
+            sourcePath: rawDatasources.path,
+            instancePath: datasourcesMeta.errors?.[0]?.instancePath ?? '',
+          },
+        );
+      }
+    }
     const datasources = await loadDatasources(opts.projectRoot);
     const schemas = this.registry.list();
 
@@ -884,11 +924,17 @@ export class Pipeline {
     try {
       const runnerOpts: {strict?: boolean} = {};
       if (opts.strict === true) runnerOpts.strict = true;
-      files = await this.runner.run(
+      // Apply per-run schema overrides (currently the CLI ↔ engine
+      // `--emit-graphql-sdl` handshake on `config['graphql-overrides']`)
+      // BEFORE handing the schema set to the runner. The runner extracts
+      // `x-<kind>` per-schema options in `buildContext`, so the override
+      // must already live on the schema by the time it arrives. See
+      // `applyGraphqlSdlOverride` for the merge semantics.
+      const schemasForEmit = this.applyGraphqlSdlOverride(
         this.registry.list(),
-        opts.emitFlags,
-        runnerOpts,
+        opts.config,
       );
+      files = await this.runner.run(schemasForEmit, opts.emitFlags, runnerOpts);
     } catch (err) {
       if (err instanceof ContractsCodegenError) throw err;
       throw new ContractsCodegenError(
@@ -905,6 +951,18 @@ export class Pipeline {
     // pass-through. See contracts-extensibility.md §"Module-format choice".
     const transformedFiles = applyModuleFormat(files, opts.moduleFormat);
 
+    // Stage 7c.6 — per-directory barrels. README §"Generated layout"
+    // promises one `index.ts` per generated LB4-idiom directory
+    // (`models`, `repositories`, `controllers`, `datasources`) so
+    // downstream code can `import {X} from '../models'` without naming
+    // the specific file. `buildBarrels` is a pure projection over
+    // `transformedFiles` — module-format normalisation has already run,
+    // so the barrel sees the final extensions and doesn't need a second
+    // pass through {@link ModuleFormatTransformer}. Returns `[]` for
+    // projects with no LB4-idiom output (e.g. sidecar-only runs), so
+    // existing zero-output projects are unaffected.
+    const barrelFiles = this.buildBarrels(transformedFiles);
+
     // Stage 7d — the single atomic commit point. Emitter output is
     // rooted at `paths.outputDir`; queued meta-schemas (which live at
     // `paths.root/_meta`) anchor at `paths.root` via the per-file root
@@ -915,6 +973,7 @@ export class Pipeline {
     // preserving the no-partial-writes guarantee across the two anchors.
     const allFiles: readonly EmittedFile[] = [
       ...transformedFiles,
+      ...barrelFiles,
       ...this.writeQueue,
     ];
     const perFileRoots = new Map<string, string>();
@@ -928,6 +987,126 @@ export class Pipeline {
     );
 
     return {created: written.created, updated: written.updated};
+  }
+
+  /**
+   * Apply the CLI ↔ engine `--emit-graphql-sdl` handshake to every
+   * schema before the runner extracts its per-schema `x-graphql` block.
+   *
+   * The CLI flag (`gen.ts:applyPerSchemaOverrides`) sets a sibling
+   * `'graphql-overrides': {sdl: true}` key on the config. The
+   * `GraphQLEmitter` reads its `sdl` toggle from a schema's `x-graphql`
+   * block at emit time, so a sibling config key never reached the
+   * emitter — the documented flag was silently a no-op. This step
+   * forwards the override by shallow-copying every schema that has (or
+   * could opt into) GraphQL emission and merging `sdl: true` into its
+   * `x-graphql` block.
+   *
+   * Returns the input array unchanged when the override is not set,
+   * which keeps the no-op path zero-cost. When set, returns a fresh
+   * array of shallow-copied schemas so the originals (and the
+   * registry) stay untouched — `EmitterRunner.buildContext` shallow-
+   * freezes whatever schema it receives.
+   */
+  private applyGraphqlSdlOverride(
+    schemas: readonly JSONSchema[],
+    config: LoopbackConfigJson,
+  ): readonly JSONSchema[] {
+    const overrides = (
+      config as LoopbackConfigJson & {
+        readonly 'graphql-overrides'?: {readonly sdl?: boolean};
+      }
+    )['graphql-overrides'];
+    if (overrides?.sdl !== true) return schemas;
+    return schemas.map(schema => {
+      const existing = schema['x-graphql'];
+      const existingBlock = isPlainObject(existing) ? existing : {};
+      const mergedBlock = {...existingBlock, sdl: true};
+      const copy: JSONSchema = {...schema, 'x-graphql': mergedBlock};
+      return copy;
+    });
+  }
+
+  /**
+   * Group emitted files by their immediate parent directory and produce
+   * one `index.ts` barrel per directory via {@link BarrelGenerator}.
+   * Only the four LB4-idiom roots (`models`, `repositories`,
+   * `controllers`, `datasources`) get barrels — sidecar emitter output
+   * (`zod`, `types`, `graphql`, ...) lives under its own per-kind tree
+   * and is not part of the README-documented barrel surface.
+   *
+   * `.base.<kind>.ts` files are the source of re-exports; `.<kind>.ts`
+   * extension files are NOT internal (they're the user-editable
+   * counterpart), so the `hasExtension` predicate reports `true` when
+   * the engine just emitted (or the project already shipped) the
+   * matching extension stub — the barrel then re-exports BOTH so a
+   * downstream `import {X} from '../models'` resolves whether `X` is
+   * owned by the base or the extension.
+   *
+   * Returns `[]` when no LB4-idiom files were emitted, preserving the
+   * existing zero-output projects.
+   */
+  private buildBarrels(files: readonly EmittedFile[]): readonly EmittedFile[] {
+    type BarrelDir = 'models' | 'repositories' | 'controllers' | 'datasources';
+    type BarrelKind = 'model' | 'repository' | 'controller' | 'datasource';
+    const dirKinds: Readonly<Record<BarrelDir, BarrelKind>> = {
+      models: 'model',
+      repositories: 'repository',
+      controllers: 'controller',
+      datasources: 'datasource',
+    };
+    // Per-directory name set (kebab basenames stripped of `.base.<kind>`)
+    // plus a per-(dir,name) flag for whether an extension stub was emitted
+    // alongside the base in this run. The flag drives the
+    // `hasExtension` callback `BarrelGenerator.generate` accepts, so the
+    // engine itself does no filesystem I/O — keeps the helper pure.
+    const names: Record<BarrelDir, Set<string>> = {
+      models: new Set(),
+      repositories: new Set(),
+      controllers: new Set(),
+      datasources: new Set(),
+    };
+    const extensions: Record<BarrelDir, Set<string>> = {
+      models: new Set(),
+      repositories: new Set(),
+      controllers: new Set(),
+      datasources: new Set(),
+    };
+    for (const file of files) {
+      const slash = file.path.indexOf('/');
+      if (slash < 0) continue;
+      const dir = file.path.slice(0, slash) as BarrelDir;
+      if (!(dir in dirKinds)) continue;
+      const kind = dirKinds[dir];
+      const basename = file.path.slice(slash + 1);
+      if (!basename.endsWith('.ts')) continue;
+      const stem = basename.slice(0, -'.ts'.length);
+      const baseSuffix = `.base.${kind}`;
+      const extSuffix = `.${kind}`;
+      if (stem.endsWith(baseSuffix)) {
+        names[dir].add(stem.slice(0, -baseSuffix.length));
+      } else if (stem.endsWith(extSuffix)) {
+        extensions[dir].add(stem.slice(0, -extSuffix.length));
+      }
+    }
+    const hasExt = (name: string, kind: BarrelKind): boolean => {
+      // Reverse-lookup the dir from the kind — only one dir per kind, so
+      // the map collapses to a single entry.
+      for (const [dir, k] of Object.entries(dirKinds) as readonly [
+        BarrelDir,
+        BarrelKind,
+      ][]) {
+        if (k === kind) return extensions[dir].has(name);
+      }
+      return false;
+    };
+    return this.barrels.generate({
+      models: [...names.models],
+      repositories: [...names.repositories],
+      controllers: [...names.controllers],
+      datasources: [...names.datasources],
+      hasExtension: hasExt,
+    });
   }
 
   /**
@@ -1435,27 +1614,47 @@ async function loadDiffStateCache(
 async function loadDatasources(
   projectRoot: string,
 ): Promise<DatasourceConfigJson[]> {
+  const raw = await loadRawDatasources(projectRoot);
+  if (raw === undefined) return [];
+  const parsed = parseDatasourcesJson(raw.raw, raw.path);
+  assertNoDuplicateDatasourceNames(parsed, raw.path);
+  return parsed;
+}
+
+/**
+ * Read and parse `<projectRoot>/datasources.json` and return the RAW
+ * top-level JSON value alongside the absolute path. Returns `undefined`
+ * when the file does not exist (ENOENT remains benign — a contracts-only
+ * project legitimately ships no datasources).
+ *
+ * Kept separate from {@link loadDatasources} so stage 5 can validate the
+ * raw shape against {@link buildDatasourcesMetaSchema} BEFORE
+ * {@link parseDatasourcesJson} folds the keyed-map layout into the flat
+ * array form. Without this split, the meta-schema's `oneOf` (array vs
+ * keyed-map) would never see the keyed-map branch.
+ *
+ * Other I/O errors (EPERM, EISDIR, EMFILE, etc.) and JSON parse failures
+ * surface as typed {@link ContractsValidationError}s so the root cause
+ * isn't mis-attributed to "no datasources declared".
+ */
+async function loadRawDatasources(
+  projectRoot: string,
+): Promise<{readonly raw: unknown; readonly path: string} | undefined> {
   const path = resolve(projectRoot, 'datasources.json');
-  let raw: string;
+  let text: string;
   try {
-    raw = await readFile(path, 'utf8');
+    text = await readFile(path, 'utf8');
   } catch (err) {
-    // ENOENT is benign — a contracts-only project legitimately ships no
-    // datasources, and stage 5's cross-validation will surface a clear
-    // error if any config still references one. Other I/O errors
-    // (EPERM, EISDIR, EMFILE, etc.) indicate a real problem reading the
-    // file the user authored; surface them with the OS message so the
-    // root cause isn't mis-attributed to "no datasources declared".
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw new ContractsValidationError(
       `stage 5: failed to read datasources.json: ${(err as Error).message}`,
       {sourcePath: path, instancePath: ''},
       {cause: err},
     );
   }
-  let json: unknown;
+  let raw: unknown;
   try {
-    json = JSON.parse(raw);
+    raw = JSON.parse(text);
   } catch (cause) {
     throw new ContractsValidationError(
       `stage 5: invalid JSON in datasources.json: ${(cause as Error).message}`,
@@ -1463,9 +1662,7 @@ async function loadDatasources(
       {cause},
     );
   }
-  const parsed = parseDatasourcesJson(json, path);
-  assertNoDuplicateDatasourceNames(parsed, path);
-  return parsed;
+  return {raw, path};
 }
 
 /**
