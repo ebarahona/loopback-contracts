@@ -1,4 +1,4 @@
-// `lb4 override <kind> <contract>` — emit a single user-editable extension
+// `lb-contracts override <kind> <contract>` — emit a single user-editable extension
 // stub for an existing contract or datasource.
 //
 // One-shot scaffolder: refuses to overwrite an existing extension file
@@ -9,13 +9,17 @@
 // base descriptor, and hands the extension descriptor to `FileWriter`.
 //
 // See `loopback-contracts.md` §"CLI command reference" — entry for
-// `lb4 override`.
+// `lb-contracts override`.
 
 import {Application} from '@loopback/core';
-import {ContractsCodegenError} from '../../helpers';
-import {existsSync, readFileSync} from 'node:fs';
+import {
+  ContractsCodegenError,
+  readDatasourcesDoc,
+  readJsoncStrict,
+} from '../../helpers';
+import type {DatasourcesDoc} from '../../helpers';
+import {existsSync} from 'node:fs';
 import {isAbsolute, join, relative, resolve} from 'node:path';
-import {parse as parseJsonc} from 'jsonc-parser';
 import {createCliContext} from '../cli-context';
 import {note} from '../prompts';
 import {ContractsComponent} from '../../contracts.component';
@@ -42,7 +46,7 @@ import type {
   ModelConfigJson,
 } from '../../types';
 
-/** The four kinds `lb4 override` accepts as its first positional arg. */
+/** The four kinds `lb-contracts override` accepts as its first positional arg. */
 const VALID_KINDS = [
   'model',
   'repository',
@@ -53,7 +57,7 @@ const VALID_KINDS = [
 type OverrideKind = (typeof VALID_KINDS)[number];
 
 /**
- * Run `lb4 override <kind> <contract>`. Returns `0` on success, non-zero on
+ * Run `lb-contracts override <kind> <contract>`. Returns `0` on success, non-zero on
  * any user-visible failure. Never throws past its own boundary.
  *
  * @public
@@ -68,23 +72,23 @@ export async function runOverride(opts: {
 
   if (kindArg === undefined || kindArg === '') {
     process.stderr.write(
-      'lb4 override: missing required <kind> argument.\n' +
+      'lb-contracts override: missing required <kind> argument.\n' +
         `Valid kinds: ${VALID_KINDS.join(', ')}.\n` +
-        'Usage: lb4 override <kind> <contract>\n',
+        'Usage: lb-contracts override <kind> <contract>\n',
     );
     return 1;
   }
   if (!isValidKind(kindArg)) {
     process.stderr.write(
-      `lb4 override: unknown kind '${kindArg}'. ` +
+      `lb-contracts override: unknown kind '${kindArg}'. ` +
         `Valid kinds: ${VALID_KINDS.join(', ')}.\n`,
     );
     return 1;
   }
   if (contractArg === undefined || contractArg.trim() === '') {
     process.stderr.write(
-      'lb4 override: missing required <contract> argument.\n' +
-        'Usage: lb4 override <kind> <contract>\n',
+      'lb-contracts override: missing required <contract> argument.\n' +
+        'Usage: lb-contracts override <kind> <contract>\n',
     );
     return 1;
   }
@@ -101,8 +105,9 @@ export async function runOverride(opts: {
     const dsEntry = findDatasourceEntry(opts.projectRoot, contractName);
     if (dsEntry === undefined) {
       process.stderr.write(
-        `lb4 override: datasource '${contractName}' not found in ` +
-          `datasources.json. Run \`lb4 ds ${contractName}\` first.\n`,
+        `lb-contracts override: datasource '${contractName}' not found in ` +
+          `datasources.json. Run \`lb-contracts ds ${contractName} ` +
+          `--adapter <kind>\` first.\n`,
       );
       return 1;
     }
@@ -115,9 +120,9 @@ export async function runOverride(opts: {
         existsSync(configFile) ? null : configFile,
       ].filter((p): p is string => p !== null);
       process.stderr.write(
-        `lb4 override: contract '${contractName}' not found ` +
+        `lb-contracts override: contract '${contractName}' not found ` +
           `(missing ${missing.join(', ')}). ` +
-          `Run \`lb4 contract ${contractName}\` first.\n`,
+          `Run \`lb-contracts contract ${contractName}\` first.\n`,
       );
       return 1;
     }
@@ -180,7 +185,7 @@ export async function runOverride(opts: {
       // Defensive — the generators always return one descriptor when
       // `includeExtension` is true.
       process.stderr.write(
-        'lb4 override: no extension file was produced (engine returned ' +
+        'lb-contracts override: no extension file was produced (engine returned ' +
           'an empty descriptor list).\n',
       );
       return 1;
@@ -193,7 +198,7 @@ export async function runOverride(opts: {
         '',
         `  ${formatRelative(opts.projectRoot, writtenPath)}`,
         '',
-        'Edit this file by hand; `lb4 gen` will never overwrite it. ' +
+        'Edit this file by hand; `lb-contracts gen` will never overwrite it. ' +
           'The matching `.base.*.ts` file regenerates on every run.',
       ].join('\n'),
       'Override created',
@@ -224,7 +229,7 @@ interface ProducerOpts {
  * Resolve the requested generator from the booted application, build a
  * minimal {@link GeneratorContext}, and return the extension descriptor
  * (the regenerated base is dropped — the user already has it from the
- * last `lb4 gen` run).
+ * last `lb-contracts gen` run).
  */
 async function produceExtension(
   app: Application,
@@ -383,6 +388,13 @@ interface LoadedFiles {
  * Read and parse the authored schema + config pair for one contract. Both
  * are accepted as JSONC so a comment in either file does not break the
  * override flow.
+ *
+ * Read + JSONC parse is delegated to {@link readJsoncStrict} so a
+ * malformed sidecar throws {@link ContractsValidationError} with the
+ * uniform parse-error block (file path + JSONC error code + line/column +
+ * raw offset) instead of silently scaffolding an extension stub from
+ * partial data — `jsonc-parser`'s `parse()` doesn't throw on errors, it
+ * records them into the passed array and returns whatever it recovered.
  */
 function loadContractFiles(opts: ProducerOpts): LoadedFiles {
   const schemaFile = resolve(
@@ -394,14 +406,14 @@ function loadContractFiles(opts: ProducerOpts): LoadedFiles {
     `${opts.kebab}.config.json`,
   );
 
-  const schema = parseJsonc(readFileSync(schemaFile, 'utf8'), [], {
-    allowTrailingComma: true,
-    disallowComments: false,
-  }) as JSONSchema;
-  const config = parseJsonc(readFileSync(configFile, 'utf8'), [], {
-    allowTrailingComma: true,
-    disallowComments: false,
-  }) as ModelConfigJson;
+  const schema = readJsoncStrict(
+    schemaFile,
+    `schema '${opts.contractName}'`,
+  ) as JSONSchema;
+  const config = readJsoncStrict(
+    configFile,
+    `config for contract '${opts.contractName}'`,
+  ) as ModelConfigJson;
   return {schema, config};
 }
 
@@ -409,28 +421,33 @@ function loadContractFiles(opts: ProducerOpts): LoadedFiles {
  * Look up one datasource entry from `<projectRoot>/datasources.json` and
  * convert it into the {@link DatasourceConfigJson} shape the datasource
  * generator consumes. Accepts both the doc's keyed-object layout
- * (`{"primary": {"adapter": "mongodb"}}`) and a legacy array-of-objects
+ * (`{"primary": {"adapter": "mongodb"}}`) and the legacy array-of-objects
  * layout (`[{"name": "primary", "adapter": "mongodb"}]`).
+ *
+ * Read + JSONC parse is delegated to {@link readDatasourcesDoc} so a
+ * malformed file produces the same diagnostic block emitted by
+ * `lb-contracts ds` and `lb-contracts contract` — previously this
+ * function hand-parsed with `jsonc-parser`'s `parse()`, ignored the
+ * returned `ParseError[]`, and converted the partial parse into a
+ * misleading "datasource not found" message that hid the real problem
+ * (typo in the JSON). The helper returns `undefined` for the benign
+ * missing-file case and throws {@link ContractsValidationError} for the
+ * unreadable / malformed / wrong-top-level cases; we let the throw
+ * propagate so `runOverride`'s `try`/`finally` shuts the app down and the
+ * dispatcher renders the uniform error block.
  */
 function findDatasourceEntry(
   projectRoot: string,
   name: string,
 ): DatasourceConfigJson | undefined {
   const path = resolve(projectRoot, 'datasources.json');
-  if (!existsSync(path)) return undefined;
-  let parsed: unknown;
-  try {
-    parsed = parseJsonc(readFileSync(path, 'utf8'), [], {
-      allowTrailingComma: true,
-      disallowComments: false,
-    });
-  } catch {
-    return undefined;
-  }
-  if (parsed === null || typeof parsed !== 'object') return undefined;
+  const doc: DatasourcesDoc | undefined = readDatasourcesDoc(path);
+  // Missing `datasources.json` is benign here — the caller renders the
+  // "not found, run `lb-contracts ds` first" nudge for the user.
+  if (doc === undefined) return undefined;
 
-  if (Array.isArray(parsed)) {
-    for (const entry of parsed) {
+  if (Array.isArray(doc)) {
+    for (const entry of doc) {
       if (
         entry !== null &&
         typeof entry === 'object' &&
@@ -443,7 +460,13 @@ function findDatasourceEntry(
     return undefined;
   }
 
-  const value = (parsed as Record<string, unknown>)[name];
+  // Keyed-map layout: the map key wins as the datasource name (matches
+  // the precedence rule in `normaliseDatasources` and the engine
+  // pipeline's `parseDatasourcesJson`). Strip the engine-injected fields
+  // out of the per-entry block before handing them to the generator as
+  // free-form `config`.
+  const map = doc as Record<string, unknown>;
+  const value = map[name];
   if (value === undefined || value === null || typeof value !== 'object') {
     return undefined;
   }

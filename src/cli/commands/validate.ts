@@ -97,6 +97,19 @@ export async function runValidate(opts: RunValidateOptions): Promise<number> {
 
   let exitCode = 0;
   try {
+    // Start lifecycle observers BEFORE resolving the pipeline. The
+    // `'contracts'` group includes `ManifestEmitterBooter`, which walks
+    // `<projectRoot>/emitters/*.emitter.json` and registers manifest-backed
+    // emitters into the `EmitterRegistry`. Without this call, the registry
+    // only contains the TS-class built-in emitters, and stage 5's strict
+    // `emit.<kind>` meta-schema would reject valid `emit.cloudevents: true`
+    // (and similar manifest-only slots) — `lb-contracts gen` accepts the
+    // same config because it does call `app.start()`. The booter only
+    // needs `PROJECT_PATHS` + `SCHEMA_REGISTRY` (both bound above), so the
+    // codegen-only bindings (`TEMPLATE_ENGINE`, `IMPORT_MAP`) that the
+    // validate path intentionally omits are not required here.
+    await app.start();
+
     const pipeline = await app.get<Pipeline>(ContractsEngineBindings.PIPELINE);
 
     const emitFlags: Record<string, boolean> = {};
@@ -137,9 +150,11 @@ export async function runValidate(opts: RunValidateOptions): Promise<number> {
     emit(opts.projectRoot, [], flags);
     return exitCode;
   } finally {
-    // `Application` does not own any open resources for the validate path
-    // (no servers, no lifecycle observers started), but stopping it keeps
-    // parity with `gen` and guards against future bindings that do.
+    // Mirror `gen.ts`'s teardown: `app.start()` above fires the
+    // `'contracts'` lifecycle group (notably `ManifestEmitterBooter`), so
+    // `app.stop()` must run to release whatever those observers acquired.
+    // Best-effort — a stop failure during teardown must not mask the
+    // validate exit code.
     try {
       await app.stop();
     } catch {

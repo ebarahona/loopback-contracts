@@ -18,4 +18,5 @@ export {
   toKebab,
   toPascal,
 } from './identifiers';
+export {readJsoncStrict} from './jsonc-strict';
 export {redactUrl, redactUrlsInText} from './redact-url';
