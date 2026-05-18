@@ -39,6 +39,27 @@ const ROOT_NO_CONFIG = join(
   tmpdir(),
   `lb4-idiom-no-config-${randomBytes(8).toString('hex')}`,
 );
+// Datasource validation fixtures: cover the three cases the pipeline must
+// reject at stage 5 instead of silently dropping the user into a confusing
+// stage-8 tsc error.
+//   1. Config references a datasource but datasources.json doesn't exist.
+//   2. Config references a typo'd datasource name (e.g. 'primry') when
+//      a real one ('primary') is declared.
+//   3. datasources.json uses the keyed-map layout (the preferred form
+//      `lb4 ds` writes); the loader must populate the meta-schema enum
+//      from this layout, not just the array form.
+const ROOT_DS_MISSING = join(
+  tmpdir(),
+  `lb4-idiom-ds-missing-${randomBytes(8).toString('hex')}`,
+);
+const ROOT_DS_TYPO = join(
+  tmpdir(),
+  `lb4-idiom-ds-typo-${randomBytes(8).toString('hex')}`,
+);
+const ROOT_DS_KEYED_MAP = join(
+  tmpdir(),
+  `lb4-idiom-ds-keyed-map-${randomBytes(8).toString('hex')}`,
+);
 // PR-C follow-up fixtures: a datasources-only project (no schemas) and a
 // 5-schema project (no configs) for the per-project single-fire check.
 const ROOT_DATASOURCES_ONLY = join(
@@ -292,6 +313,9 @@ beforeAll(() => {
   seedDatasourcesOnlyFixture(ROOT_DATASOURCES_ONLY);
   seedFiveSchemasFixture(ROOT_FIVE_SCHEMAS);
   seedInlineBindingsFixture(ROOT_INLINE_BINDINGS);
+  seedDsMissingFixture(ROOT_DS_MISSING);
+  seedDsTypoFixture(ROOT_DS_TYPO);
+  seedDsKeyedMapFixture(ROOT_DS_KEYED_MAP);
 });
 
 afterAll(() => {
@@ -300,6 +324,9 @@ afterAll(() => {
   rmSync(ROOT_DATASOURCES_ONLY, {recursive: true, force: true});
   rmSync(ROOT_FIVE_SCHEMAS, {recursive: true, force: true});
   rmSync(ROOT_INLINE_BINDINGS, {recursive: true, force: true});
+  rmSync(ROOT_DS_MISSING, {recursive: true, force: true});
+  rmSync(ROOT_DS_TYPO, {recursive: true, force: true});
+  rmSync(ROOT_DS_KEYED_MAP, {recursive: true, force: true});
 });
 
 async function bootstrap(
@@ -559,6 +586,199 @@ describe('LB4-idiom emitter path — edge cases (PR-C follow-up)', () => {
       expect(
         written.some(p => p.endsWith('controllers/person.base.controller.ts')),
       ).toBe(true);
+    } finally {
+      await app.stop();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Datasource cross-validation: stage 5 must catch "config references a
+// datasource that isn't declared in datasources.json" with a clear error,
+// rather than silently passing and dumping the user into a confusing
+// stage-8 tsc error pointing at a generated repository import. Covers
+// both layouts of datasources.json so a future loader regression on the
+// keyed-map form is also caught here.
+// ---------------------------------------------------------------------------
+
+function seedDsMissingFixture(root: string): void {
+  mkdirSync(join(root, 'schemas'), {recursive: true});
+  mkdirSync(join(root, 'configs'), {recursive: true});
+
+  writeFileSync(
+    join(root, 'loopback.config.json'),
+    JSON.stringify(CONFIG, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'schemas', 'person.schema.json'),
+    JSON.stringify(PERSON_SCHEMA, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'configs', 'person.config.json'),
+    JSON.stringify(PERSON_CONFIG, null, 2),
+    'utf8',
+  );
+  // Deliberately NO datasources.json — the cross-validation must reject
+  // PERSON_CONFIG's `dataSource: 'mem'` reference and the hint must
+  // suggest `lb4 ds add mem`.
+}
+
+function seedDsTypoFixture(root: string): void {
+  mkdirSync(join(root, 'schemas'), {recursive: true});
+  mkdirSync(join(root, 'configs'), {recursive: true});
+
+  writeFileSync(
+    join(root, 'loopback.config.json'),
+    JSON.stringify(CONFIG, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'schemas', 'person.schema.json'),
+    JSON.stringify(PERSON_SCHEMA, null, 2),
+    'utf8',
+  );
+  // Config references 'primry' (typo of 'primary'); datasources.json
+  // declares only 'primary'. The error message must name the typo AND
+  // list the available alternatives.
+  writeFileSync(
+    join(root, 'configs', 'person.config.json'),
+    JSON.stringify({...PERSON_CONFIG, dataSource: 'primry'}, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'datasources.json'),
+    JSON.stringify([{name: 'primary', adapter: 'memory', config: {}}], null, 2),
+    'utf8',
+  );
+}
+
+function seedDsKeyedMapFixture(root: string): void {
+  mkdirSync(join(root, 'schemas'), {recursive: true});
+  mkdirSync(join(root, 'configs'), {recursive: true});
+
+  writeFileSync(
+    join(root, 'loopback.config.json'),
+    JSON.stringify(CONFIG, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'schemas', 'person.schema.json'),
+    JSON.stringify(PERSON_SCHEMA, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'configs', 'person.config.json'),
+    JSON.stringify(PERSON_CONFIG, null, 2),
+    'utf8',
+  );
+  // Keyed-map layout (preferred form `lb4 ds` writes). The loader must
+  // recognise this AND populate the meta-schema enum from it; the array
+  // form is already covered by the other fixtures.
+  writeFileSync(
+    join(root, 'datasources.json'),
+    JSON.stringify(
+      {
+        $schema: '../_meta/datasources.schema.json',
+        mem: {adapter: 'memory', config: {}},
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+}
+
+describe('LB4-idiom emitter path — datasource cross-validation', () => {
+  it('rejects a config that references a datasource missing from datasources.json', async () => {
+    const app = await bootstrap(ROOT_DS_MISSING, CONFIG);
+    try {
+      const pipeline = await app.get<Pipeline>(
+        ContractsEngineBindings.PIPELINE,
+      );
+
+      await expect(
+        pipeline.run({
+          projectRoot: ROOT_DS_MISSING,
+          config: {...CONFIG, schemas: [join(ROOT_DS_MISSING, 'schemas')]},
+          emitFlags: {model: true, repository: true},
+          skipTsc: true,
+        }),
+      ).rejects.toThrow(/datasource 'mem' which is not declared/);
+
+      // Hint must guide the user to the actual fix.
+      await expect(
+        pipeline.run({
+          projectRoot: ROOT_DS_MISSING,
+          config: {...CONFIG, schemas: [join(ROOT_DS_MISSING, 'schemas')]},
+          emitFlags: {model: true, repository: true},
+          skipTsc: true,
+        }),
+      ).rejects.toThrow(/lb4 ds add mem/);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it("rejects a typo'd datasource name at the meta-schema enum step", async () => {
+    const app = await bootstrap(ROOT_DS_TYPO, CONFIG);
+    try {
+      const pipeline = await app.get<Pipeline>(
+        ContractsEngineBindings.PIPELINE,
+      );
+
+      // When `datasources.json` IS present and non-empty,
+      // `buildModelConfigMetaSchema()` populates the `dataSource` enum
+      // with the declared names. Ajv rejects the typo at meta-schema
+      // validation, BEFORE the cross-validation cross-check fires.
+      // The cross-check is the safety net for the "no datasources.json
+      // at all" path tested separately above.
+      await expect(
+        pipeline.run({
+          projectRoot: ROOT_DS_TYPO,
+          config: {...CONFIG, schemas: [join(ROOT_DS_TYPO, 'schemas')]},
+          emitFlags: {model: true, repository: true},
+          skipTsc: true,
+        }),
+      ).rejects.toThrow(/failed meta-schema validation/);
+
+      await expect(
+        pipeline.run({
+          projectRoot: ROOT_DS_TYPO,
+          config: {...CONFIG, schemas: [join(ROOT_DS_TYPO, 'schemas')]},
+          emitFlags: {model: true, repository: true},
+          skipTsc: true,
+        }),
+      ).rejects.toThrow(/\/dataSource must be equal to one of the allowed/);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('accepts a config when datasources.json uses the keyed-map layout', async () => {
+    const app = await bootstrap(ROOT_DS_KEYED_MAP, CONFIG);
+    try {
+      const pipeline = await app.get<Pipeline>(
+        ContractsEngineBindings.PIPELINE,
+      );
+
+      // Should NOT throw — the keyed-map loader must surface 'mem' in
+      // the cross-validation set so PERSON_CONFIG's reference resolves.
+      const result = await pipeline.run({
+        projectRoot: ROOT_DS_KEYED_MAP,
+        config: {...CONFIG, schemas: [join(ROOT_DS_KEYED_MAP, 'schemas')]},
+        emitFlags: {model: true, repository: true, datasource: true},
+        skipTsc: true,
+      });
+
+      const written = result.filesWritten.map(p => p.replace(/\\/g, '/'));
+      expect(
+        written.some(p => p.endsWith('datasources/mem.base.datasource.ts')),
+      ).toBe(true);
+      expect(written.some(p => p.endsWith('models/person.base.model.ts'))).toBe(
+        true,
+      );
     } finally {
       await app.stop();
     }

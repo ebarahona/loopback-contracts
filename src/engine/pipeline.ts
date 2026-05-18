@@ -680,7 +680,9 @@ export class Pipeline {
         // can look up their LB4 metadata by `$contractId` at emit time.
         if (isPlainObject(json)) {
           // Ajv validated against buildModelConfigMetaSchema(); the shape is `ModelConfigJson` by construction.
-          this.configs.add(json as unknown as ModelConfigJson);
+          const config = json as unknown as ModelConfigJson;
+          assertDatasourceDeclared(config, datasources, file);
+          this.configs.add(config);
         }
       }
 
@@ -713,7 +715,9 @@ export class Pipeline {
           // Validation passed — load into the per-contract config registry so
           // lb4-idiom-tier emitters (model/repository/controller/datasource)
           // can look up their LB4 metadata by `$contractId` at emit time.
-          this.configs.add(entry as ModelConfigJson);
+          const config = entry as ModelConfigJson;
+          assertDatasourceDeclared(config, datasources, inlineConfigPath, i);
+          this.configs.add(config);
         }
       }
     } catch (err) {
@@ -997,6 +1001,59 @@ interface ParsedSchema {
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Reject a {@link ModelConfigJson} whose `dataSource` field names a
+ * datasource that isn't declared in `datasources.json`. Without this
+ * cross-check, a config like `{dataSource: 'primary'}` against an empty
+ * `datasources.json` (or a typo like `'primry'`) would pass stage 5 —
+ * the meta-schema only emits a `dataSource` enum when the loaded
+ * datasource list is non-empty (see `buildModelConfigMetaSchema()` in
+ * `meta-schema-generator.ts`), so missing/typo'd references silently
+ * slip through. The user only finds out at stage 8 when `tsc` blows up
+ * on a non-existent `../datasources/<name>.base.datasource` import the
+ * repository generator emitted — a confusing failure mode pointing at
+ * generated code instead of the actual config error.
+ *
+ * Throws a typed {@link ContractsValidationError} naming the missing
+ * datasource and the available alternatives, plus a hint on how to add
+ * one. `sourcePath` mirrors the disk-vs-inline error shape the rest of
+ * stage 5 uses; pass the inline-bindings index as `bindingIndex` to
+ * stamp the right `instancePath`.
+ */
+function assertDatasourceDeclared(
+  config: ModelConfigJson,
+  datasources: readonly DatasourceConfigJson[],
+  sourcePath: string,
+  bindingIndex?: number,
+): void {
+  const declared = new Set(datasources.map(d => d.name));
+  if (declared.has(config.dataSource)) return;
+  const available =
+    declared.size === 0
+      ? '(no datasources declared)'
+      : [...declared].sort().join(', ');
+  const hint =
+    declared.size === 0
+      ? 'Create `datasources.json` at the project root and add an entry for ' +
+        `'${config.dataSource}' (e.g. \`lb4 ds add ${config.dataSource}\`).`
+      : `Available: ${available}. Add '${config.dataSource}' to ` +
+        '`datasources.json` or correct the typo.';
+  const instancePath =
+    bindingIndex !== undefined
+      ? `/config-bindings/${bindingIndex}/dataSource`
+      : '/dataSource';
+  throw new ContractsValidationError(
+    `stage 5: config '${config.$contractId}' references datasource ` +
+      `'${config.dataSource}' which is not declared in datasources.json. ` +
+      hint,
+    {
+      sourcePath,
+      instancePath,
+      schemaId: config.$contractId,
+    },
+  );
 }
 
 /**
@@ -1356,18 +1413,63 @@ async function loadDiffStateCache(
   }
 }
 
+/**
+ * Load `<projectRoot>/datasources.json` and return a flat
+ * `DatasourceConfigJson[]` regardless of which on-disk layout the project
+ * uses. Two layouts are accepted, in lock-step with
+ * `normaliseDatasources()` in `src/generators/datasource-generator.ts`:
+ *
+ *   - Array form: `[{"name": "primary", "adapter": "mongodb", ...}, ...]`
+ *   - Keyed-map form: `{"primary": {"adapter": "mongodb", ...}, ...}` —
+ *     preferred shape (`lb4 ds` writes this). The optional `$schema`
+ *     key is skipped. Each entry is normalised by folding the map key
+ *     in as the entry's `name` field so the returned array shape is
+ *     uniform across both layouts.
+ *
+ * Missing or unreadable `datasources.json` returns `[]`. A malformed
+ * entry (non-object value, string value other than `$schema`) is also
+ * dropped silently here — stage 5's meta-schema validation catches
+ * shape-level problems with a richer error, so this loader stays a
+ * simple parse-and-normalise pass.
+ */
 async function loadDatasources(
   projectRoot: string,
 ): Promise<DatasourceConfigJson[]> {
   const path = resolve(projectRoot, 'datasources.json');
+  let json: unknown;
   try {
     const raw = await readFile(path, 'utf8');
-    const json = JSON.parse(raw) as unknown;
-    if (Array.isArray(json)) return json as DatasourceConfigJson[];
-    return [];
+    json = JSON.parse(raw);
   } catch {
     return [];
   }
+  if (Array.isArray(json)) {
+    return (json as readonly unknown[]).filter(
+      (entry): entry is DatasourceConfigJson =>
+        entry !== null &&
+        typeof entry === 'object' &&
+        typeof (entry as {name?: unknown}).name === 'string',
+    );
+  }
+  if (json !== null && typeof json === 'object') {
+    const out: DatasourceConfigJson[] = [];
+    for (const [name, value] of Object.entries(
+      json as Record<string, unknown>,
+    )) {
+      if (name === '$schema') continue;
+      if (value === null || typeof value !== 'object') continue;
+      // Fold the map key in as the canonical `name`. If the entry
+      // already declares a different `name`, the map key wins — that's
+      // the same precedence `normaliseDatasources()` applies in the
+      // generator, so the engine's view stays in lock-step.
+      out.push({
+        ...(value as DatasourceConfigJson),
+        name,
+      });
+    }
+    return out;
+  }
+  return [];
 }
 
 async function listConfigFiles(configsDir: string): Promise<string[]> {
