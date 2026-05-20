@@ -15,15 +15,28 @@ import type {JSONSchema} from './emitter-context.interface';
  * engine emits. New meta-schemas added in future engine versions widen the
  * union; existing contributors are unaffected because they match by literal.
  *
+ * Targets:
+ * - `_meta/model-config.schema.json` — per-model config envelope
+ *   (`$contractId`, `dataSource`, `relations.*.schema` enums) validated
+ *   against every `configs/*.config.json` and inline `config-bindings[]`.
+ * - `_meta/datasources.schema.json` — `datasources.json` validator with
+ *   the project-specific `adapter` enum derived from installed connectors.
+ * - `_meta/emitter.schema.json` — registry of every emitter currently
+ *   bound under `EMITTER_TAG` plus its per-schema options schema; consumed
+ *   by emitter dispatch and by per-schema `x-<emitter-kind>` validation.
+ * - `_meta/loopback-config.schema.json` — root validator for
+ *   `loopback.config.json` itself; carries the strict-kinds pass that
+ *   rejects unknown `emit.*` slots and other top-level typos.
+ *
  * @experimental
  */
 export interface MetaSchemaContributor {
   /** Which meta-schema this contributor mutates. */
   readonly target:
-    | '_meta/emitter-config.schema.json'
     | '_meta/model-config.schema.json'
     | '_meta/datasources.schema.json'
-    | '_meta/emitter.schema.json';
+    | '_meta/emitter.schema.json'
+    | '_meta/loopback-config.schema.json';
 
   /**
    * Return the new meta-schema document. Implementations must not mutate

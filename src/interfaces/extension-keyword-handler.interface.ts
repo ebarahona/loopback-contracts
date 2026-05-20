@@ -15,6 +15,13 @@ import type {JSONSchema} from './emitter-context.interface';
  * Use this extension point only for keywords that need cross-cutting
  * validation independent of any single emitter.
  *
+ * Note: as of v1.0, registered `ExtensionKeywordHandler` contributions are
+ * NOT invoked by the pipeline. The interface is published as a
+ * forward-compatibility hook; the schema-traversal phase that would consume
+ * it will land in a v1.x minor. Plugins implementing this interface today
+ * should expect their handlers to be registered but unused; track
+ * [INSERT ISSUE NUMBER OR TODO] for status.
+ *
  * @experimental
  */
 export interface ExtensionKeywordHandler {

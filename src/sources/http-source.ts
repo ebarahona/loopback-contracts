@@ -40,10 +40,14 @@ import {SchemaSourceCache} from './source-cache';
  * listing fan-out is capped at 8 concurrent requests via an in-process
  * semaphore.
  *
- * Redirects are followed (`fetch` default). The ETag cache is keyed by the
- * final response URL (`res.url`) — and the original-to-final URL mapping
- * is persisted — so a `301` does not cause repeated re-fetches of the
- * redirected resource.
+ * Redirects are followed manually via {@link followRedirects} (capped at
+ * {@link MAX_REDIRECTS}); each hop is re-validated against
+ * {@link assertHostAllowed} **before** the next request lands, closing the
+ * SSRF window where `redirect: 'follow'` would silently hit a private
+ * destination (e.g., `169.254.169.254`) reached via a public-host redirect.
+ * The ETag cache is keyed by the final response URL — and the
+ * original-to-final URL mapping is persisted — so a `301` does not cause
+ * repeated re-fetches of the redirected resource.
  *
  * @internal
  */
@@ -109,7 +113,7 @@ export class HttpSchemaSource implements SchemaSource {
     const previousEtag = await this.cache.etag(requestUrl);
     if (previousEtag !== undefined) headers.set('If-None-Match', previousEtag);
 
-    const fetched = await safeFetch(requestUrl, headers, this.scheme);
+    const fetched = await followRedirects(requestUrl, headers, this.scheme);
     const res = fetched.response;
     if (res.status === 304) {
       // Manifest key = descriptor URI (stable); ETag key = final URL (follows redirects).
@@ -127,12 +131,12 @@ export class HttpSchemaSource implements SchemaSource {
       await this.cache.invalidate(uri);
       return this.fetchSingle(uri, attempt + 1);
     }
-    assertOk(res, requestUrl, this.scheme);
-    const content = await readBodyText(fetched, requestUrl, this.scheme);
+    assertOk(res, fetched.finalUrl, this.scheme);
+    const content = await readBodyText(fetched, fetched.finalUrl, this.scheme);
     const result: SchemaSourceResult = [{source: uri, path: uri, content}];
     await this.cache.write(uri, result);
     const newEtag = res.headers.get('etag');
-    const finalUrl = res.url || requestUrl;
+    const finalUrl = fetched.finalUrl;
     if (finalUrl !== uri) {
       await this.cache.setRedirect(uri, finalUrl);
     }
@@ -159,7 +163,11 @@ export class HttpSchemaSource implements SchemaSource {
     const previousEtag = await this.cache.etag(indexRequestUrl);
     if (previousEtag !== undefined) headers.set('If-None-Match', previousEtag);
 
-    const fetchedIndex = await safeFetch(indexRequestUrl, headers, this.scheme);
+    const fetchedIndex = await followRedirects(
+      indexRequestUrl,
+      headers,
+      this.scheme,
+    );
     const indexRes = fetchedIndex.response;
     if (indexRes.status === 304) {
       const cached = await this.cache.read(uri);
@@ -175,13 +183,13 @@ export class HttpSchemaSource implements SchemaSource {
       await this.cache.invalidate(indexRequestUrl);
       return this.fetchDirectory(uri, attempt + 1);
     }
-    assertOk(indexRes, indexRequestUrl, this.scheme);
+    assertOk(indexRes, fetchedIndex.finalUrl, this.scheme);
     const indexBody = await readBodyText(
       fetchedIndex,
-      indexRequestUrl,
+      fetchedIndex.finalUrl,
       this.scheme,
     );
-    const filenames = parseIndex(indexBody, indexRequestUrl, this.scheme);
+    const filenames = parseIndex(indexBody, fetchedIndex.finalUrl, this.scheme);
 
     const limit = createSemaphore(MAX_CONCURRENT_FETCHES);
     const results: SchemaSourceResult = await Promise.all(
@@ -189,20 +197,24 @@ export class HttpSchemaSource implements SchemaSource {
         limit(async () => {
           const fileUrl = `${base}/${name}`;
           assertHostAllowed(fileUrl, this.scheme, allowPrivateHostsFromEnv());
-          const fetchedFile = await safeFetch(
+          const fetchedFile = await followRedirects(
             fileUrl,
             new Headers(),
             this.scheme,
           );
-          assertOk(fetchedFile.response, fileUrl, this.scheme);
-          const content = await readBodyText(fetchedFile, fileUrl, this.scheme);
-          return {source: uri, path: fileUrl, content};
+          assertOk(fetchedFile.response, fetchedFile.finalUrl, this.scheme);
+          const content = await readBodyText(
+            fetchedFile,
+            fetchedFile.finalUrl,
+            this.scheme,
+          );
+          return {source: uri, path: fetchedFile.finalUrl, content};
         }),
       ),
     );
     await this.cache.write(uri, results);
     const newEtag = indexRes.headers.get('etag');
-    const finalUrl = indexRes.url || indexRequestUrl;
+    const finalUrl = fetchedIndex.finalUrl;
     if (finalUrl !== indexUrl) {
       await this.cache.setRedirect(indexUrl, finalUrl);
     }
@@ -216,6 +228,20 @@ const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
 
 /** Maximum number of in-flight `fetch` calls during a directory walk. */
 const MAX_CONCURRENT_FETCHES = 8;
+
+/**
+ * Maximum number of HTTP redirects to follow before giving up. Matches the
+ * undici/`fetch` default so that opting into manual redirect handling does
+ * not silently shrink the redirect budget observed by callers.
+ */
+const MAX_REDIRECTS = 10;
+
+/**
+ * HTTP status codes that designate a redirect with a `Location` header
+ * (RFC 7231 §6.4 / RFC 7538). 304 is intentionally excluded — it is handled
+ * by the caller's ETag path, not the redirect loop.
+ */
+const REDIRECT_STATUSES = new Set<number>([301, 302, 303, 307, 308]);
 
 /**
  * Maximum depth for the 304+cache-evaporated retry chain. Two attempts is
@@ -451,11 +477,15 @@ function parseIndex(body: string, indexUrl: string, scheme: string): string[] {
 /**
  * Response + controller pair returned by {@link safeFetch}. The controller is
  * surfaced so the call site can abort the body-read phase under the same
- * timeout (see {@link readBodyText}).
+ * timeout (see {@link readBodyText}). `finalUrl` is the URL of the request
+ * that produced `response` — for a single-hop `safeFetch` call it equals
+ * the input `url`; after {@link followRedirects} it reflects the last URL
+ * the redirect loop validated and fetched.
  */
 interface SafeFetchResult {
   readonly response: Response;
   readonly controller: AbortController;
+  readonly finalUrl: string;
 }
 
 /**
@@ -463,6 +493,16 @@ interface SafeFetchResult {
  * request is bounded by a per-call timeout via `AbortController`. The
  * controller is returned alongside the {@link Response} so the body-read
  * phase can be guarded by a sibling timeout — see {@link readBodyText}.
+ *
+ * @remarks
+ * Issues exactly one hop with `redirect: 'manual'` so redirect handling can
+ * be done in {@link followRedirects}, which re-runs {@link assertHostAllowed}
+ * on every hop. Calling `fetch` with `redirect: 'follow'` would let undici
+ * silently land on a private/link-local destination after a public-host
+ * 30x — the very SSRF window this loader defends against. The loader only
+ * ever issues GETs (schemas are immutable downloads), which keeps the
+ * 307/308 method-preservation contract trivially satisfied; non-GET callers
+ * would need to extend {@link followRedirects} accordingly.
  */
 async function safeFetch(
   url: string,
@@ -478,10 +518,10 @@ async function safeFetch(
   try {
     const response = await fetch(url, {
       headers,
-      redirect: 'follow',
+      redirect: 'manual',
       signal: controller.signal,
     });
-    return {response, controller};
+    return {response, controller, finalUrl: url};
   } catch (cause) {
     const code =
       cause instanceof Error
@@ -505,6 +545,77 @@ async function safeFetch(
     );
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * Issue {@link safeFetch} in a loop, manually following HTTP 30x responses
+ * with `assertHostAllowed` re-validated on every hop. Caps the chain at
+ * {@link MAX_REDIRECTS}.
+ *
+ * Defends against the SSRF window where a public host returns a redirect
+ * (e.g., 302 → `http://169.254.169.254/...`) and `fetch`'s built-in
+ * `redirect: 'follow'` lands on the private destination before the caller
+ * can inspect `Response.url`. Here, every redirect target is parsed,
+ * scheme-checked (`http:`/`https:` only — `javascript:`, `data:`, `file:`,
+ * etc. are rejected), host-checked via {@link assertHostAllowed}, and only
+ * then re-fetched.
+ *
+ * Assumes the request method is `GET` — schemas are immutable downloads and
+ * the loader only ever fetches them. Non-2xx 30x responses on a non-GET
+ * request would need a method-preserving (307/308) vs method-degrading
+ * (301/302/303) split; if you extend this loader to issue POSTs, add that
+ * branch and throw on the degrading codes.
+ *
+ * Returns the first non-3xx response together with the URL that produced it,
+ * so caller-side ETag/redirect bookkeeping can key on the final URL.
+ */
+async function followRedirects(
+  url: string,
+  headers: Headers,
+  scheme: string,
+): Promise<SafeFetchResult> {
+  let currentUrl = url;
+  let hops = 0;
+  for (;;) {
+    const fetched = await safeFetch(currentUrl, headers, scheme);
+    const res = fetched.response;
+    if (!REDIRECT_STATUSES.has(res.status)) {
+      return {...fetched, finalUrl: currentUrl};
+    }
+    const location = res.headers.get('location');
+    if (location === null || location === '') {
+      throw new ContractsSourceError(
+        `HTTP redirect (${res.status}) from '${currentUrl}' without Location header`,
+        {scheme, uri: currentUrl},
+      );
+    }
+    let nextUrl: URL;
+    try {
+      nextUrl = new URL(location, currentUrl);
+    } catch (cause) {
+      throw new ContractsSourceError(
+        `HTTP redirect from '${currentUrl}' has unparseable Location '${location}'`,
+        {scheme, uri: currentUrl},
+        {cause},
+      );
+    }
+    if (nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') {
+      throw new ContractsSourceError(
+        `HTTP redirect from '${currentUrl}' targets disallowed scheme ` +
+          `'${nextUrl.protocol}' — only http:/https: are followed`,
+        {scheme, uri: currentUrl},
+      );
+    }
+    assertHostAllowed(nextUrl.toString(), scheme, allowPrivateHostsFromEnv());
+    hops++;
+    if (hops > MAX_REDIRECTS) {
+      throw new ContractsSourceError(
+        `HTTP redirect chain from '${url}' exceeded cap (${MAX_REDIRECTS} hops)`,
+        {scheme, uri: url},
+      );
+    }
+    currentUrl = nextUrl.toString();
   }
 }
 

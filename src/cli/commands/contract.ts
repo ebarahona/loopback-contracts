@@ -1,4 +1,4 @@
-// `lb4 contract <name>` — scaffold the two authored JSON files
+// `lb-contracts contract <name>` — scaffold the two authored JSON files
 // (`schemas/<name>.schema.json` + `configs/<name>.config.json`) for a new
 // contract. One-shot scaffolder: refuses to overwrite, runs an interactive
 // wizard via the local `../prompts` facade, optionally delegates to a
@@ -99,7 +99,7 @@ const FORMATTING: FormattingOptions = {
 const CANCEL_CODE = 'CONTRACTS_CLI_CANCELLED';
 
 /**
- * Run the interactive `lb4 contract <name>` command.
+ * Run the interactive `lb-contracts contract <name>` command.
  *
  * Returns `0` on success, `2` on refusal-to-overwrite / missing
  * arguments, `1` on runtime failure, and `130` on user cancel
@@ -636,13 +636,13 @@ function resolvePaths(
  * `renderError` to render.
  *
  * Accepts both on-disk layouts:
- *   - The canonical keyed-object shape `lb4 ds` writes today, where each
+ *   - The canonical keyed-object shape `lb-contracts ds <name> --adapter <kind>` writes today, where each
  *     top-level key is the datasource name and the value is the adapter
  *     block (with an optional `$schema` sibling we filter out).
  *   - The legacy array-of-objects shape `[{name, adapter, ...}]` that
  *     hand-authored or imported configs might still carry — kept so a
  *     user mid-migration isn't told "No datasources found" right after
- *     running `lb4 ds`.
+ *     running `lb-contracts ds <name> --adapter <kind>`.
  */
 function readDatasourceNames(projectRoot: string): readonly string[] {
   const path = resolve(projectRoot, 'datasources.json');

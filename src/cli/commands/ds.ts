@@ -1,4 +1,4 @@
-// `lb4 ds <name>` — append a new entry to the project's `datasources.json`.
+// `lb-contracts ds <name> --adapter <kind>` — append a new entry to the project's `datasources.json`.
 //
 // One-shot scaffolder: refuses to overwrite an existing entry. Creates the
 // file if missing, complete with the `$schema` reference VS Code needs for
@@ -6,7 +6,7 @@
 // `@clack/prompts`) for any missing required field when a TTY is attached;
 // runs silently when invoked from a script with everything pre-flagged.
 //
-// See `loopback-contracts.md` §"CLI command reference" — entry for `lb4 ds`.
+// See `loopback-contracts.md` §"CLI command reference" — entry for `lb-contracts ds`.
 
 import {existsSync, readFileSync} from 'node:fs';
 import {mkdir, writeFile} from 'node:fs/promises';
@@ -28,7 +28,7 @@ import {note, select, text} from '../prompts';
  */
 const CANCEL_CODE = 'CONTRACTS_CLI_CANCELLED';
 
-/** Flags `lb4 ds` recognises as first-class — everything else is pass-through. */
+/** Flags `lb-contracts ds` recognises as first-class — everything else is pass-through. */
 const KNOWN_FLAGS = new Set([
   'adapter',
   'url',
@@ -49,7 +49,7 @@ type AdapterChoice =
   | 'other';
 
 /**
- * Parsed, normalised command-line arguments for one `lb4 ds` invocation.
+ * Parsed, normalised command-line arguments for one `lb-contracts ds` invocation.
  * Every field except `name` and `adapter` is optional at parse time; the
  * interactive layer fills the required ones when stdin is a TTY.
  */
@@ -67,7 +67,7 @@ interface ParsedArgs {
 }
 
 /**
- * Run `lb4 ds <name>`. Returns `0` on success, non-zero on user-visible
+ * Run `lb-contracts ds <name> --adapter <kind>`. Returns `0` on success, non-zero on user-visible
  * failure. Never throws past its own boundary — every failure surfaces
  * through the exit code so the CLI dispatcher renders a uniform frame.
  *
@@ -211,7 +211,7 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
 
   const firstPositional = positionals[0];
   if (firstPositional !== undefined) out.name = firstPositional;
-  // Anything past the first positional is ignored — `lb4 ds` takes one name.
+  // Anything past the first positional is ignored — `lb-contracts ds` takes one name.
   return out;
 }
 

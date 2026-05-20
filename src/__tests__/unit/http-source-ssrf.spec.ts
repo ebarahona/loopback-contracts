@@ -138,4 +138,56 @@ describe('HttpSchemaSource SSRF hardening', () => {
     );
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  /**
+   * Regression guard for the cross-origin-redirect SSRF window. Prior to the
+   * manual redirect loop, undici's `redirect: 'follow'` would land on the
+   * private host (e.g., the EC2/IMDS endpoint) reached via a public-host
+   * 302 *before* the post-fetch `res.url` check could refuse it — at which
+   * point the metadata service had already responded. The loader now
+   * re-runs `assertHostAllowed` on every redirect hop before issuing the
+   * next request.
+   */
+  describe('manual redirect handling (SSRF cross-origin redirect)', () => {
+    it('throws ContractsSourceError when a public host 302s to 169.254.169.254 — second fetch must not fire', async () => {
+      const publicUrl = 'https://attacker.example.com/contract.json';
+      const privateUrl = 'http://169.254.169.254/latest/meta-data/iam/';
+
+      // Always answer the public host with a 302 → private host. If the
+      // SSRF guard is broken and the loader tries to follow the redirect,
+      // the second call will request `privateUrl`; we throw loudly in that
+      // case so the test fails with an actionable signal rather than a hang.
+      fetchSpy.mockImplementation(async (input: string | URL | Request) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        if (url === publicUrl) {
+          return new Response(null, {
+            status: 302,
+            headers: {location: privateUrl},
+          });
+        }
+        throw new Error(
+          `second fetch must not be issued — SSRF guard regressed (saw ${url})`,
+        );
+      });
+
+      const src = new HttpSchemaSource(projectRoot);
+      const err = await src.fetch(publicUrl).then(
+        () => {
+          throw new Error('expected fetch to throw');
+        },
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(ContractsSourceError);
+      expect((err as Error).message).toMatch(/169\.254\.169\.254/);
+      // Exactly one hop fired — the public 302. The redirect target was
+      // refused by `assertHostAllowed` before any second fetch was issued.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(fetchSpy.mock.calls[0]?.[0]).toBe(publicUrl);
+    });
+  });
 });

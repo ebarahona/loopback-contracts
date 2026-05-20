@@ -209,7 +209,7 @@ Every flag has a `loopback.config.json` counterpart so the project's default emi
 
 ## Schema sources
 
-Where do the `schemas/*.schema.json` files come from? Four built-in source kinds, plus the `SOURCE_EXTENSION_TAG` extension point for plugins.
+Where do the `schemas/*.schema.json` files come from? Four built-in source kinds, plus the `SOURCE_TAG` extension point for plugins to contribute additional resolver schemes.
 
 | Source                                 | Spec format                                          | Notes                                                                      |
 | -------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -217,7 +217,7 @@ Where do the `schemas/*.schema.json` files come from? Four built-in source kinds
 | `npm:`                                 | `npm:@my-org/contracts@^1.2.0`                       | Installs the package and reads schemas from its `dist/schemas/` directory. |
 | `git+https`                            | `git+https://github.com/my-org/contracts.git#v1.2.0` | Shallow-clones into `.loopback/cache/`, reads from the ref's checkout.     |
 | `https`                                | `https://my-org.dev/contracts/customer.schema.json`  | Per-file HTTP fetch; cached under `.loopback/cache/`.                      |
-| `<extension>` (e.g. `s3://`, `oci://`) | Defined by the plugin under `SOURCE_EXTENSION_TAG`   | See [HELP_WANTED.md](./HELP_WANTED.md) for the open list.                  |
+| `<extension>` (e.g. `s3://`, `oci://`) | Defined by the plugin under `SOURCE_TAG`             | See [HELP_WANTED.md](./HELP_WANTED.md) for the open list.                  |
 
 Source specs are configured in `loopback.config.json` under the `sources` array; the engine resolves every spec in declaration order and merges the resulting schema set before validation.
 
@@ -240,14 +240,14 @@ Every `lb-contracts gen` invocation walks the same eight stages in order. Failur
 
 Six extension-point tags. All stable at v1.0. Plugins register bindings under the appropriate tag and the engine resolves them via LB4's native `@extensions.list({tag: ...})` mechanism — the same pattern `@loopback/authentication` uses for strategies and `@loopback/boot` uses for booters.
 
-| Tag                           | What it extends                                                                                                                                 |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EMITTER_TAG`                 | Add a new `ProjectionEmitter` for a not-yet-covered output format. CLI auto-accepts `--emit-<kind>`; `lb-contracts init` auto-shows the option. |
-| `SOURCE_TAG`                  | The four built-in source kinds (`local`, `npm:`, `git+https`, `https`) all bind under this tag.                                                 |
-| `SOURCE_EXTENSION_TAG`        | Contribute a new source kind (`s3://`, `oci://`, etc.) without touching the built-in resolvers.                                                 |
-| `EXTENSION_KEYWORD_TAG`       | Register a handler for an `x-*` keyword in source schemas (e.g. `x-graphql`, `x-emit-skip`). The engine routes the keyword to your handler.     |
-| `META_SCHEMA_CONTRIBUTOR_TAG` | Contribute additional enums to the generated `_meta/*.schema.json` files (e.g. plugin-specific adapter kinds, valid emitter options).           |
-| `VALIDATOR_TAG`               | Register additional Ajv formats (`phone`, `objectid`, org-internal formats) and keywords used by source schemas.                                |
+| Tag                           | What it extends                                                                                                                                                             |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EMITTER_TAG`                 | Add a new `ProjectionEmitter` for a not-yet-covered output format. CLI auto-accepts `--emit-<kind>`; `lb-contracts init` auto-shows the option.                             |
+| `SOURCE_TAG`                  | Schema source resolvers — built-in (`local`, `npm:`, `git+https`, `https`) AND plugin-contributed schemes (`s3://`, `oci://`, etc.).                                        |
+| `SOURCE_EXTENSION_TAG`        | Contribute import-source wizard entries to `lb-contracts contract` (e.g. Zod import, OpenAPI import). Not for adding source resolution schemes (use `SOURCE_TAG` for that). |
+| `EXTENSION_KEYWORD_TAG`       | Register a handler for an `x-*` keyword in source schemas (e.g. `x-graphql`, `x-emit-skip`). The engine routes the keyword to your handler.                                 |
+| `META_SCHEMA_CONTRIBUTOR_TAG` | Contribute additional enums to the generated `_meta/*.schema.json` files (e.g. plugin-specific adapter kinds, valid emitter options).                                       |
+| `VALIDATOR_TAG`               | Register additional Ajv formats (`phone`, `objectid`, org-internal formats) and keywords used by source schemas.                                                            |
 
 Auto-integration is the architectural guarantee: when an emitter binding appears under `EMITTER_TAG`, the CLI flag parser, `lb-contracts init` prompts, and meta-schema generator all pick it up automatically. No emitter author edits the CLI, the prompt machinery, or the meta-schema generator.
 

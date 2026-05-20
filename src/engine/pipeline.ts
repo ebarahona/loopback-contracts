@@ -1,4 +1,10 @@
-import {BindingScope, inject, injectable} from '@loopback/core';
+import {
+  BindingScope,
+  ContextView,
+  filterByTag,
+  inject,
+  injectable,
+} from '@loopback/core';
 import {execFile} from 'node:child_process';
 import {randomBytes} from 'node:crypto';
 import {mkdir, open, readdir, readFile, rename, unlink} from 'node:fs/promises';
@@ -17,10 +23,13 @@ import {
   readDatasourcesDoc,
 } from '../helpers';
 import type {
+  ContractsValidator,
   EmittedFile,
   JSONSchema,
   LossyReport,
+  MetaSchemaContributor,
   ProjectPaths,
+  ValidatorContext,
 } from '../interfaces';
 import {ContractsBindings} from '../keys';
 import type {
@@ -182,6 +191,22 @@ export class Pipeline {
     // and never create a second sibling binding.
     @inject('classes.BarrelGenerator')
     private readonly barrels: BarrelGenerator,
+    /**
+     * Reactive view over every {@link ContractsValidator} bound under
+     * {@link ContractsBindings.VALIDATOR_TAG}. Resolved at each `run()`
+     * call; an empty view is a no-op. See {@link runValidators} for the
+     * stage hook.
+     */
+    @inject.view(filterByTag(ContractsBindings.VALIDATOR_TAG))
+    private readonly validatorsView: ContextView<ContractsValidator>,
+    /**
+     * Reactive view over every {@link MetaSchemaContributor} bound under
+     * {@link ContractsBindings.META_SCHEMA_CONTRIBUTOR_TAG}. Walked in
+     * stage 5 after each meta-schema is built and before it is queued
+     * for write or used to compile a runtime validator.
+     */
+    @inject.view(filterByTag(ContractsBindings.META_SCHEMA_CONTRIBUTOR_TAG))
+    private readonly metaSchemaContributorsView: ContextView<MetaSchemaContributor>,
   ) {}
 
   /**
@@ -325,6 +350,12 @@ export class Pipeline {
     // write so the command remains read-only.
     if (opts.validateOnly === true) return this.summarise(stagesRun);
 
+    // Run any `pre`-stage validators contributed via
+    // `ContractsBindings.VALIDATOR_TAG` immediately before codegen, per
+    // the {@link ContractsValidator} contract ("before any emitter
+    // runs"). An empty validator set is a no-op.
+    await this.runValidators('pre', opts);
+
     const writeResult = await this.stage7Codegen(opts);
     stagesRun = 7;
 
@@ -359,6 +390,12 @@ export class Pipeline {
         stagesRun,
       };
     }
+
+    // Run any `post`-stage validators between codegen and `tsc --noEmit`,
+    // per the {@link ContractsValidator} contract ("after all emitters
+    // have produced files, before `tsc --noEmit`"). An empty validator
+    // set is a no-op.
+    await this.runValidators('post', opts);
 
     const tscOk = await this.stage8Tsc(opts);
     stagesRun = 8;
@@ -655,9 +692,35 @@ export class Pipeline {
     // mutated meta-schemas behind. We now buffer the writes in
     // `writeQueue` and flush them in stage 7d alongside emitter output,
     // so any pre-codegen failure rolls back cleanly.
-    const modelConfigMeta = buildModelConfigMetaSchema(schemas, datasources);
-    const datasourcesMeta = buildDatasourcesMetaSchema(installedAdapters);
-    const emitterManifestMeta = buildEmitterManifestMetaSchema();
+    // Snapshot the {@link MetaSchemaContributor} extension list once per
+    // stage-5 invocation so every meta-schema below sees the same
+    // contributor set (and ordering) regardless of how many of them
+    // resolve. Empty list -> the helper returns its input untouched.
+    const metaContributors = await this.metaSchemaContributorsView.values();
+
+    // Each meta-schema is built, then passed through
+    // {@link applyMetaSchemaContributors} so registered contributors can
+    // augment it. Contributors run in registration (LB4 binding) order;
+    // each receives the previous contributor's output, so a downstream
+    // contributor can refine an upstream contribution. The CONTRIBUTED
+    // copy is what we queue to disk AND what we compile into the
+    // runtime validator below — meta-schema and validator stay in
+    // lock-step.
+    const modelConfigMeta = this.applyMetaSchemaContributors(
+      '_meta/model-config.schema.json',
+      buildModelConfigMetaSchema(schemas, datasources) as JSONSchema,
+      metaContributors,
+    );
+    const datasourcesMeta = this.applyMetaSchemaContributors(
+      '_meta/datasources.schema.json',
+      buildDatasourcesMetaSchema(installedAdapters) as JSONSchema,
+      metaContributors,
+    );
+    const emitterManifestMeta = this.applyMetaSchemaContributors(
+      '_meta/emitter.schema.json',
+      buildEmitterManifestMetaSchema() as JSONSchema,
+      metaContributors,
+    );
     // Collect the registered emitter kinds so the loopback-config meta-
     // schema can constrain `emit.*` boolean slots to the real kind enum
     // — a typo like `emit.zodd` then fails meta-schema validation
@@ -671,10 +734,14 @@ export class Pipeline {
     // entries with the SAME enums as the standalone per-file pass:
     // `$contractId` constrained to loaded schema `$id`s, `dataSource`
     // constrained to declared datasource names.
-    const loopbackConfigMeta = buildLoopbackConfigMetaSchema(
-      emitterKinds,
-      schemas,
-      datasources,
+    const loopbackConfigMeta = this.applyMetaSchemaContributors(
+      '_meta/loopback-config.schema.json',
+      buildLoopbackConfigMetaSchema(
+        emitterKinds,
+        schemas,
+        datasources,
+      ) as JSONSchema,
+      metaContributors,
     );
 
     // INVARIANT: in-memory meta-schemas drive validation NOW; the queued
@@ -1165,6 +1232,148 @@ export class Pipeline {
   }
 
   /**
+   * Apply every {@link MetaSchemaContributor} whose `target` matches the
+   * named meta-schema to the supplied document, chaining contributors in
+   * LB4 binding-registration order. Each contributor receives the
+   * previous output; the contract forbids in-place mutation, so the
+   * helper just threads the returned object through the chain.
+   *
+   * Defensive on three axes:
+   *   - Empty contributor list -\> returns `current` unchanged (no-op).
+   *   - A contributor that returns a non-object (or `null`) is rejected
+   *     with a typed {@link ContractsValidationError} naming the plugin's
+   *     constructor so the offending contribution is identifiable.
+   *   - A contributor that throws is wrapped in
+   *     {@link ContractsValidationError} carrying the same identifier,
+   *     so an opaque "TypeError: x is undefined" surfaces as a stage-5
+   *     plugin failure with provenance instead of a bare stack trace.
+   *
+   * The returned schema is what the caller queues to disk AND compiles
+   * into the runtime Ajv validator — the on-disk meta-schema and the
+   * stage-5 validator therefore stay byte-equivalent.
+   */
+  private applyMetaSchemaContributors(
+    target: string,
+    current: JSONSchema,
+    contributors: readonly MetaSchemaContributor[],
+  ): JSONSchema {
+    if (contributors.length === 0) return current;
+    let acc = current;
+    for (const contributor of contributors) {
+      if (contributor.target !== target) continue;
+      let next: unknown;
+      try {
+        next = contributor.contribute(acc);
+      } catch (cause) {
+        throw new ContractsValidationError(
+          `stage 5: meta-schema contributor '${contributorLabel(contributor)}' ` +
+            `threw while augmenting '${target}': ${(cause as Error).message}`,
+          {sourcePath: target, instancePath: ''},
+          {cause},
+        );
+      }
+      if (next === null || typeof next !== 'object' || Array.isArray(next)) {
+        throw new ContractsValidationError(
+          `stage 5: meta-schema contributor '${contributorLabel(contributor)}' ` +
+            `returned a non-object for '${target}' ` +
+            `(got ${next === null ? 'null' : Array.isArray(next) ? 'array' : typeof next}); ` +
+            'contributors must return a JSON Schema object',
+          {sourcePath: target, instancePath: ''},
+        );
+      }
+      acc = next as JSONSchema;
+    }
+    return acc;
+  }
+
+  /**
+   * Invoke every {@link ContractsValidator} registered under
+   * {@link ContractsBindings.VALIDATOR_TAG} whose `stage` matches
+   * `stage`. Empty validator set is a no-op. A validator that returns
+   * `ok: false` aborts the pipeline with a typed error naming the
+   * plugin; a validator that throws is wrapped with the same provenance.
+   *
+   * `'pre'` validators surface as {@link ContractsValidationError}
+   * (codegen has not yet started, so the failure is a validation gate).
+   * `'post'` validators surface as {@link ContractsCodegenError} — files
+   * have already been written and the failure attribution is the
+   * codegen artefact, not an authored input. Unknown/custom stage
+   * strings follow the same `'post'` mapping per the interface's
+   * "treated as `'post'` for forward compatibility" clause.
+   *
+   * Issues with `severity: 'info'` or `severity: 'warn'` (when
+   * `ok: true`) are forwarded to the lossy reporter and never abort.
+   */
+  private async runValidators(
+    stage: 'pre' | 'post',
+    opts: PipelineRunOptions,
+  ): Promise<void> {
+    const validators = await this.validatorsView.values();
+    if (validators.length === 0) return;
+    // The validator interface requires a `ReadonlyMap<string, JSONSchema>`
+    // keyed by `$id`; the registry exposes a list snapshot, so we
+    // materialise the map here. Schemas missing an `$id` cannot land in
+    // the registry by construction (stage 2 rejects them), so the
+    // `typeof === 'string'` guard is defensive belt-and-braces.
+    const schemaMap = new Map<string, JSONSchema>();
+    for (const schema of this.registry.list()) {
+      const id = (schema as {$id?: unknown}).$id;
+      if (typeof id === 'string' && id.length > 0) schemaMap.set(id, schema);
+    }
+    const context: ValidatorContext = {
+      paths: this.paths,
+      schemas: schemaMap,
+      strict: opts.strict === true,
+    };
+    for (const validator of validators) {
+      const validatorStage =
+        validator.stage === 'pre' ? 'pre' : ('post' as const);
+      if (validatorStage !== stage) continue;
+      let result;
+      try {
+        result = await validator.validate(context);
+      } catch (cause) {
+        throw wrapValidatorError(stage, validator, cause);
+      }
+      // Forward non-fatal issues so the CLI's lossy report surfaces
+      // them. `ok: false` issues are folded into the thrown error
+      // message below; `ok: true` issues are pure advisory.
+      if (result.ok && result.issues !== undefined) {
+        for (const issue of result.issues) {
+          if (issue.severity === 'info' || issue.severity === 'warn') {
+            const source: {schemaId: string; instancePath?: string} = {
+              schemaId: issue.schemaId ?? '',
+            };
+            if (issue.instancePath !== undefined) {
+              source.instancePath = issue.instancePath;
+            }
+            this.lossy.report({
+              feature: `validator/${contributorLabel(validator)}`,
+              source,
+              severity: issue.severity,
+              message: issue.message,
+            });
+          }
+        }
+      }
+      if (!result.ok) {
+        const summary = formatValidatorIssues(result.issues);
+        const label = contributorLabel(validator);
+        if (stage === 'pre') {
+          throw new ContractsValidationError(
+            `stage 5+: validator '${label}' rejected the run:\n${summary}`,
+            {sourcePath: this.paths.root, instancePath: ''},
+          );
+        }
+        throw new ContractsCodegenError(
+          `stage 7+: post-codegen validator '${label}' rejected the run:\n${summary}`,
+          {emitterKind: `validator/${label}`, schemaId: '<all>'},
+        );
+      }
+    }
+  }
+
+  /**
    * Push one meta-schema document into the deferred write queue (flushed
    * in stage 7d). Path is relative to `paths.root`; the canonical
    * `_meta/<name>` location is preserved.
@@ -1235,6 +1444,71 @@ interface ParsedSchema {
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Best-effort identifier for a plugin-contributed object used purely for
+ * error-message provenance ("which plugin's contributor blew up?").
+ * Falls back to `'<anonymous>'` for objects constructed via an anonymous
+ * class expression — same policy {@link EmitterRegistry}'s
+ * `originLabel` follows.
+ */
+function contributorLabel(target: unknown): string {
+  const ctor = (target as {constructor?: {name?: string}}).constructor;
+  const name = ctor?.name;
+  return name && name.length > 0 ? name : '<anonymous>';
+}
+
+/**
+ * Wrap an exception thrown by a {@link ContractsValidator} in the right
+ * pipeline-scoped error class. `'pre'` validators surface as
+ * `ContractsValidationError` (no files written yet); `'post'` validators
+ * surface as `ContractsCodegenError` (post-emit failure).
+ */
+function wrapValidatorError(
+  stage: 'pre' | 'post',
+  validator: ContractsValidator,
+  cause: unknown,
+): ContractsValidationError | ContractsCodegenError {
+  const label = contributorLabel(validator);
+  const message = (cause as Error).message;
+  if (stage === 'pre') {
+    return new ContractsValidationError(
+      `stage 5+: validator '${label}' threw: ${message}`,
+      {sourcePath: '<validator>', instancePath: ''},
+      {cause},
+    );
+  }
+  return new ContractsCodegenError(
+    `stage 7+: post-codegen validator '${label}' threw: ${message}`,
+    {emitterKind: `validator/${label}`, schemaId: '<all>'},
+    {cause},
+  );
+}
+
+/**
+ * Format a {@link ValidationResult}'s `issues` array into a multi-line
+ * block — one line per issue, mirroring {@link formatAjvErrors}'s shape
+ * so the CLI's error renderer surfaces both in the same indentation.
+ */
+function formatValidatorIssues(
+  issues:
+    | ReadonlyArray<{
+        readonly severity: 'info' | 'warn' | 'error';
+        readonly message: string;
+        readonly schemaId?: string;
+        readonly instancePath?: string;
+      }>
+    | undefined,
+): string {
+  if (!issues || issues.length === 0) return '  (no issue details)';
+  return issues
+    .map(i => {
+      const path = i.instancePath ?? '<root>';
+      const id = i.schemaId !== undefined ? ` [${i.schemaId}]` : '';
+      return `  - ${path}${id} ${i.message} [severity=${i.severity}]`;
+    })
+    .join('\n');
 }
 
 /**

@@ -1,4 +1,4 @@
-// `lb4 init` — one-shot project scaffolder for `@ebarahona/loopback-contracts`.
+// `lb-contracts init` — one-shot project scaffolder for `@ebarahona/loopback-contracts`.
 //
 // Writes `loopback.config.json`, creates the empty schemas/ and configs/
 // directories, and ensures a `.gitignore` entry for the engine cache. Refuses
@@ -63,7 +63,7 @@ type EmitValue = boolean | '.js' | '.ts' | '';
 
 /**
  * Canonical multi-select labels for the nine built-in sidecar emitters, in
- * the exact wording shown in the doc's "Project initialization (lb4 init)"
+ * the exact wording shown in the doc's "Project initialization (lb-contracts init)"
  * section. Third-party emitter contributions discovered through the registry
  * fall back to a synthesised label.
  */
@@ -112,7 +112,7 @@ const FORMATTING: FormattingOptions = {
 const CANCEL_CODE = 'CONTRACTS_CLI_CANCELLED';
 
 /**
- * Run the interactive `lb4 init` command. Returns `0` on success, `2`
+ * Run the interactive `lb-contracts init` command. Returns `0` on success, `2`
  * for refusal-to-overwrite, `1` on runtime failure, and `130` when the
  * user cancels (SIGINT-equivalent per UNIX convention) — callers should
  * propagate the value as the process exit code.
@@ -386,7 +386,7 @@ function buildEmitMap(
  * Assemble the `loopback.config.json` document text using `jsonc-parser`'s
  * `modify` and `format` so output is pretty-printed and deterministic. The
  * `$schema` reference points at the meta-schema the engine emits during
- * `lb4 gen`; it's optional in the runtime loader but enables VS Code
+ * `lb-contracts gen`; it's optional in the runtime loader but enables VS Code
  * autocomplete the moment the file lands.
  */
 function buildConfigDocument(input: {
