@@ -5,6 +5,13 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ContractsSourceError} from '../../helpers';
 import {HttpSchemaSource} from '../../sources/http-source';
 
+// Stub `dns/promises.lookup` so tests are network-free AND so the IP-based
+// SSRF gate (`assertResolvedIpAllowed`) gets predictable answers. Each test
+// can override with `lookupMock.mockResolvedValueOnce(...)` for case-specific
+// resolutions.
+const lookupMock = vi.hoisted(() => vi.fn());
+vi.mock('node:dns/promises', () => ({lookup: lookupMock}));
+
 /**
  * The HTTP source must refuse non-https schemes and outbound requests aimed
  * at loopback/link-local/RFC1918 addresses (SSRF). When the operator opts in
@@ -24,6 +31,22 @@ describe('HttpSchemaSource SSRF hardening', () => {
       throw new Error('fetch should not have been called');
     });
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    // Default: echo IP literals (the IPv4/IPv6 SSRF tests rely on this) and
+    // resolve any non-literal hostname (e.g. `attacker.example.com`) to a
+    // benign public IP so it gets past `assertResolvedIpAllowed` and hits the
+    // fetch stub. Per-test `mockResolvedValueOnce` calls override this.
+    lookupMock.mockReset();
+    lookupMock.mockImplementation(
+      async (hostname: string, _opts?: {all?: boolean}) => {
+        if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+          return [{address: hostname, family: 4}];
+        }
+        if (hostname.includes(':')) {
+          return [{address: hostname, family: 6}];
+        }
+        return [{address: '93.184.216.34', family: 4}];
+      },
+    );
   });
 
   afterEach(() => {

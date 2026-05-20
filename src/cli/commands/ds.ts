@@ -28,8 +28,43 @@ import {note, select, text} from '../prompts';
  */
 const CANCEL_CODE = 'CONTRACTS_CLI_CANCELLED';
 
-/** Flags `lb-contracts ds` recognises as first-class — everything else is pass-through. */
-const KNOWN_FLAGS = new Set([
+/**
+ * Credential-bearing field names. Any literal (non env-ref) value parsed
+ * into one of these slots triggers a stderr warning before write, unless
+ * the user opts out with `--allow-literal-secrets`. The list is
+ * intentionally broad — every connector with a "shared-secret" auth model
+ * uses at least one of these key names, and a single source of truth
+ * keeps the warning surface uniform across `--password`, the matching
+ * `--<field>-env` flags, and the URL-userinfo check.
+ */
+const CREDENTIAL_FIELDS: readonly string[] = [
+  'password',
+  'secret',
+  'apiKey',
+  'token',
+  'accessKey',
+  'accessSecret',
+  'clientSecret',
+];
+
+/**
+ * Regex for the env-ref escape — a single `${VAR_NAME}` placeholder that
+ * the runtime resolves from `process.env`. Values matching this pattern
+ * are safe to persist verbatim and do NOT trigger the literal-secret
+ * warning.
+ */
+const ENV_REF_RE = /^\$\{[A-Z_][A-Z0-9_]*\}$/;
+
+/** Bare env-var-name grammar used to validate `--<field>-env <NAME>`. */
+const ENV_VAR_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
+
+/**
+ * Flags `lb-contracts ds` recognises as first-class — everything else is
+ * pass-through. Includes the credential-companion `--<field>-env` flags
+ * (one per {@link CREDENTIAL_FIELDS} entry) plus `--allow-literal-secrets`
+ * to suppress the literal-credential warning.
+ */
+const KNOWN_FLAGS = new Set<string>([
   'adapter',
   'url',
   'database',
@@ -37,7 +72,14 @@ const KNOWN_FLAGS = new Set([
   'port',
   'user',
   'password',
+  'allow-literal-secrets',
+  ...CREDENTIAL_FIELDS.map(f => `${kebab(f)}-env`),
 ]);
+
+/** Convert `camelCase` to `kebab-case` for CLI flag rendering. */
+function kebab(s: string): string {
+  return s.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`);
+}
 
 /** Adapter kinds offered by the interactive picker. */
 type AdapterChoice =
@@ -62,6 +104,17 @@ interface ParsedArgs {
   port?: string;
   user?: string;
   password?: string;
+  /**
+   * Credential-bearing values keyed by canonical field name (e.g.
+   * `password`, `apiKey`). Populated from either the direct literal flag
+   * (e.g. `--password mysecret`) or the env-ref flag (e.g.
+   * `--password-env POSTGRES_PASSWORD`, which lands here as
+   * `"${POSTGRES_PASSWORD}"`). Lives separately from the named slots so
+   * the warning + conflict checks can scan a single map.
+   */
+  credentials: Record<string, string>;
+  /** User opted out of the literal-credential warning. */
+  allowLiteralSecrets: boolean;
   /** Additional `--<key> <value>` pairs the user passed through. */
   passthrough: Record<string, string>;
 }
@@ -127,6 +180,13 @@ export async function runDs(opts: {
       return 2;
     }
 
+    // Emit a stderr warning for any credential-bearing literal that the
+    // user did not opt out of via `--allow-literal-secrets`. This is the
+    // last gate before the value lands in `datasources.json` — once
+    // written, the only safe recovery is rotating the credential and
+    // scrubbing git history, both of which are out-of-band for this CLI.
+    warnLiteralCredentials(parsed);
+
     const entry = buildEntry(parsed);
     await writeDatasourceEntry(datasourcesPath, name, entry);
 
@@ -179,7 +239,11 @@ export async function runDs(opts: {
  *     into `passthrough` for the connector-specific config block.
  */
 function parseArgs(argv: readonly string[]): ParsedArgs {
-  const out: ParsedArgs = {passthrough: {}};
+  const out: ParsedArgs = {
+    passthrough: {},
+    credentials: {},
+    allowLiteralSecrets: false,
+  };
   const positionals: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -197,8 +261,11 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
       value = stripped.slice(eq + 1);
     } else {
       key = stripped;
+      // Boolean flags (no value expected) must NOT consume the following
+      // positional — guard them explicitly. Add new boolean flags here.
+      const isBooleanFlag = key === 'allow-literal-secrets';
       const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith('--')) {
+      if (!isBooleanFlag && next !== undefined && !next.startsWith('--')) {
         value = next;
         i += 1;
       } else {
@@ -217,6 +284,31 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
 
 /** Dispatch a `--<key>` flag into the correct named slot or `passthrough`. */
 function assignFlag(out: ParsedArgs, key: string, value: string): void {
+  // Credential env-ref companion flags (`--password-env`, `--api-key-env`,
+  // ...). Validate the env-var name, then store the resolved
+  // `${VAR_NAME}` placeholder under the canonical field name so the
+  // write path treats it exactly like a literal value would be — except
+  // it's safe to commit. Conflict with a direct `--password` is checked
+  // in `assertCredentialFlagsConsistent` after parsing completes; here
+  // we only stash the placeholder.
+  const envMatch = matchCredentialEnvFlag(key);
+  if (envMatch !== undefined) {
+    if (!ENV_VAR_NAME_RE.test(value)) {
+      throw new ContractsValidationError(
+        `--${key} expects an env-var name matching ${ENV_VAR_NAME_RE.source}; ` +
+          `got '${value}'.`,
+        {sourcePath: '<argv>', instancePath: `/${key}`},
+      );
+    }
+    setCredential(out, envMatch, `\${${value}}`, key);
+    return;
+  }
+
+  if (key === 'allow-literal-secrets') {
+    out.allowLiteralSecrets = true;
+    return;
+  }
+
   if (KNOWN_FLAGS.has(key)) {
     switch (key) {
       case 'adapter':
@@ -239,6 +331,7 @@ function assignFlag(out: ParsedArgs, key: string, value: string): void {
         break;
       case 'password':
         out.password = value;
+        setCredential(out, 'password', value, key);
         break;
       default:
         // KNOWN_FLAGS gates entry; unreachable in practice. Throw rather
@@ -251,7 +344,48 @@ function assignFlag(out: ParsedArgs, key: string, value: string): void {
     }
     return;
   }
+
+  // Pass-through flags may still carry credentials (e.g. `--apiKey` for a
+  // connector this CLI doesn't model first-class). Mirror those into the
+  // credentials map so the warning path catches them too.
+  if (CREDENTIAL_FIELDS.includes(key)) {
+    setCredential(out, key, value, key);
+  }
   out.passthrough[key] = value;
+}
+
+/**
+ * Map a `--<field>-env` flag back to its canonical credential field name,
+ * or `undefined` if the flag is not a credential env-ref companion. Used
+ * by {@link assignFlag} so the env-ref dispatch happens in one place.
+ */
+function matchCredentialEnvFlag(key: string): string | undefined {
+  for (const field of CREDENTIAL_FIELDS) {
+    if (key === `${kebab(field)}-env`) return field;
+  }
+  return undefined;
+}
+
+/**
+ * Record a credential value under `field`, rejecting the case where the
+ * same field is filled from two conflicting sources (e.g. both
+ * `--password mysecret` and `--password-env POSTGRES_PASSWORD`).
+ */
+function setCredential(
+  out: ParsedArgs,
+  field: string,
+  value: string,
+  flag: string,
+): void {
+  const existing = out.credentials[field];
+  if (existing !== undefined && existing !== value) {
+    throw new ContractsValidationError(
+      `cannot pass both --${kebab(field)} and --${kebab(field)}-env ` +
+        '(conflicting sources for the same credential).',
+      {sourcePath: '<argv>', instancePath: `/${flag}`},
+    );
+  }
+  out.credentials[field] = value;
 }
 
 /**
@@ -365,14 +499,89 @@ function buildEntry(parsed: ParsedArgs): Record<string, unknown> {
   if (parsed.user !== undefined && parsed.user !== '') {
     entry['user'] = parsed.user;
   }
-  if (parsed.password !== undefined && parsed.password !== '') {
-    entry['password'] = parsed.password;
+  // Credentials (including the `${VAR_NAME}` placeholder produced by
+  // `--<field>-env`) ride through `parsed.credentials`; `--password`
+  // populates the same slot so this loop is the single write site for
+  // every credential-bearing field.
+  for (const [field, value] of Object.entries(parsed.credentials)) {
+    if (value === '') continue;
+    entry[field] = value;
   }
   for (const [key, value] of Object.entries(parsed.passthrough)) {
     if (value === '') continue;
+    // Skip pass-through keys already written via the credentials map to
+    // avoid double-writing the same field.
+    if (CREDENTIAL_FIELDS.includes(key)) continue;
     entry[key] = value;
   }
   return entry;
+}
+
+// ---------------------------------------------------------------------------
+// Credential-warning gate — last stop before write
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk every credential-bearing field on `parsed` plus the URL userinfo
+ * component, emitting a single multi-line stderr warning per offending
+ * value. The warning is suppressed when the user passed
+ * `--allow-literal-secrets`. Env-ref values (`${VAR}`) are always
+ * skipped — they are the recommended-and-safe shape.
+ *
+ * Routed through `process.stderr.write` so a script piping stdout from
+ * `lb-contracts ds` does not see the warning interleaved with the
+ * command's structured output.
+ */
+function warnLiteralCredentials(parsed: ParsedArgs): void {
+  if (parsed.allowLiteralSecrets) return;
+
+  for (const field of CREDENTIAL_FIELDS) {
+    const value = parsed.credentials[field];
+    if (value === undefined || value === '') continue;
+    if (ENV_REF_RE.test(value)) continue;
+    emitLiteralWarning(`--${kebab(field)}`);
+  }
+
+  // URL-shaped credential leak — `--url postgres://u:p@host/db` smuggles a
+  // password into the userinfo segment. Refuse silently if the URL won't
+  // parse (the meta-schema will catch shape errors downstream) — only
+  // warn on a confirmed credential to avoid false positives on adapter
+  // strings that aren't WHATWG URLs.
+  if (parsed.url !== undefined && parsed.url !== '') {
+    let parsedUrl: URL | undefined;
+    try {
+      parsedUrl = new URL(parsed.url);
+    } catch {
+      parsedUrl = undefined;
+    }
+    if (parsedUrl !== undefined && parsedUrl.password.length > 0) {
+      // URL-userinfo gets a bespoke message — there is no `--url-env`
+      // companion flag; the right fix is to embed `${VAR}` directly in
+      // the URL itself.
+      process.stderr.write(
+        'Warning: --url contains a userinfo password. ' +
+          'This will be persisted in datasources.json as plaintext.\n' +
+          'Recommended: embed an `${VAR}` placeholder inside the URL ' +
+          '(e.g. `postgres://user:${PG_PASSWORD}@host/db`) so the ' +
+          'credential resolves from process.env at runtime.\n' +
+          'Pass --allow-literal-secrets to suppress this warning.\n',
+      );
+    }
+  }
+}
+
+/** Format and write the canonical literal-credential warning to stderr. */
+function emitLiteralWarning(flag: string): void {
+  // `flag` is `--<kebab-field>` for credential fields; the matching
+  // env-companion is `--<kebab-field>-env`.
+  const fieldFlag = flag.startsWith('--') ? flag.slice(2) : flag;
+  process.stderr.write(
+    `Warning: ${flag} received a literal value. ` +
+      'This will be persisted in datasources.json as plaintext.\n' +
+      `Recommended: use \`--${fieldFlag}-env <NAME>\` to write a ` +
+      '`${NAME}` placeholder that resolves from process.env at runtime.\n' +
+      'Pass --allow-literal-secrets to suppress this warning.\n',
+  );
 }
 
 // ---------------------------------------------------------------------------

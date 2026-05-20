@@ -61,6 +61,113 @@ export interface LoopbackConfigJson {
    * produce a breaking output (kebab-case key matches emitter `kind`).
    */
   readonly 'migration-strategy'?: Readonly<Record<string, MigrationStrategy>>;
+  /**
+   * Optional security-posture configuration — see {@link SecurityConfig}.
+   * Absent or partial entries fall back to back-compat defaults documented
+   * on each field. Validated against the generated `loopback-config`
+   * meta-schema at stage 5 so typos under `security.*` fail loud.
+   */
+  readonly security?: SecurityConfig;
+}
+
+/**
+ * Security-posture configuration block under
+ * {@link LoopbackConfigJson.security}. Every field is optional and ships
+ * with a documented default that preserves pre-existing behaviour, so
+ * adding the block to an existing project is a no-op until at least one
+ * sub-key is set. Field-level JSDoc names the default AND the threat
+ * model the flag mitigates.
+ *
+ * The block is new pre-v1.0 surface — the shape may evolve in a minor
+ * before promotion to `@public`. Wave-by-wave the engine will move
+ * env-var fallbacks (`LB_CONTRACTS_HTTP_MAX_BYTES`, etc.) over to read
+ * these fields directly, deprecating the env-var path.
+ *
+ * @experimental
+ */
+export interface SecurityConfig {
+  /**
+   * HTTP-source guardrails. Mitigates SSRF, memory exhaustion, and
+   * DNS-rebinding attacks against the engine's HTTP/HTTPS schema fetcher.
+   * Partially honored today via env-var fallbacks; the formal plumbing
+   * to `http-source.ts` lands across subsequent waves.
+   */
+  readonly http?: {
+    /** Per-request timeout in ms. Default: `30000`. Mitigates slowloris. */
+    readonly timeoutMs?: number;
+    /**
+     * Maximum response body size in bytes. Default: `5242880` (5 MB).
+     * Mitigates memory exhaustion from a hostile or runaway remote.
+     */
+    readonly maxBodyBytes?: number;
+    /**
+     * Permit fetches whose resolved IP is in private / link-local /
+     * loopback ranges. Default: `false`. Mitigates SSRF against internal
+     * services (metadata endpoints, intranet hosts).
+     */
+    readonly allowPrivateHosts?: boolean;
+    /**
+     * Re-resolve the host and re-check the IP after redirect chains.
+     * Default: `true`. Mitigates DNS rebinding where the first lookup
+     * resolves a public IP and a follow-up resolves an internal one.
+     */
+    readonly verifyResolvedIps?: boolean;
+    /**
+     * Optional explicit allowlist of hostnames. When set, fetches against
+     * any other host fail loud. Default: unset (no allowlist; any public
+     * host permitted subject to other guards). Mitigates exfil/SSRF by
+     * narrowing the egress surface to known partners.
+     */
+    readonly allowedHosts?: readonly string[];
+    /** Follow 3xx redirects. Default: `true`. */
+    readonly allowRedirects?: boolean;
+    /**
+     * Maximum redirect-chain length. Default: `10`. Mitigates redirect-loop
+     * DoS and limits the number of DNS lookups per fetch.
+     */
+    readonly maxRedirects?: number;
+  };
+  /**
+   * Manifest-emitter discovery guardrails — see
+   * {@link ManifestEmitterBooter}. Mitigates an attacker who can drop a
+   * `*.emitter.json` into the project tree (via a malicious PR or compromised
+   * dependency) from registering a code-execution path through the template
+   * engine.
+   */
+  readonly emitters?: {
+    /**
+     * Discover and register `<projectRoot>/emitters/*.emitter.json` at
+     * boot. Default: `true` (back-compat — existing projects rely on the
+     * discovery path). Set `false` in hardened CI to pin emitters to the
+     * built-in / plugin set only.
+     */
+    readonly allowProjectManifests?: boolean;
+    /**
+     * Optional allowlist of emitter `kind` values. When set, every
+     * discovered manifest whose `kind` is not in the list is dropped at
+     * boot (logged). Default: unset (every discovered kind registers).
+     */
+    readonly allowedKinds?: readonly string[];
+  };
+  /**
+   * Codegen-stage guardrails. Mitigates a hostile schema-source from
+   * forcing arbitrary disk writes or compilation cost during a CI run.
+   */
+  readonly codegen?: {
+    /**
+     * Invoke `tsc --noEmit` at stage 8. Default: `true`. Set `false` for
+     * faster local rerolls when the project already runs `tsc` separately.
+     * The CLI's `--skip-tsc` flag is equivalent.
+     */
+    readonly runTsc?: boolean;
+    /**
+     * Trust the project root to receive engine-generated files under
+     * `src/`. Default: `true` (back-compat). Reserved for a future wave
+     * that gates file writes on this flag — declared today so consumer
+     * configs can opt in early without a schema bump later.
+     */
+    readonly trustedProject?: boolean;
+  };
 }
 
 /**

@@ -1,4 +1,5 @@
 import {BindingScope, inject, injectable} from '@loopback/core';
+import {lookup} from 'node:dns/promises';
 import {isIP} from 'node:net';
 import {ContractsSourceError} from '../helpers';
 import type {SchemaSource, SchemaSourceResult} from '../interfaces';
@@ -75,7 +76,9 @@ export class HttpSchemaSource implements SchemaSource {
    */
   async fetch(uri: string): Promise<SchemaSourceResult> {
     assertHttpsScheme(uri, this.scheme);
-    assertHostAllowed(uri, this.scheme, allowPrivateHostsFromEnv());
+    const allowPrivate = allowPrivateHostsFromEnv();
+    assertHostAllowed(uri, this.scheme, allowPrivate);
+    await assertResolvedIpAllowed(uri, this.scheme, allowPrivate);
     if (isSingleFile(uri)) {
       return this.fetchSingle(uri);
     }
@@ -108,7 +111,9 @@ export class HttpSchemaSource implements SchemaSource {
     attempt = 0,
   ): Promise<SchemaSourceResult> {
     const requestUrl = (await this.cache.redirect(uri)) ?? uri;
-    assertHostAllowed(requestUrl, this.scheme, allowPrivateHostsFromEnv());
+    const allowPrivate = allowPrivateHostsFromEnv();
+    assertHostAllowed(requestUrl, this.scheme, allowPrivate);
+    await assertResolvedIpAllowed(requestUrl, this.scheme, allowPrivate);
     const headers = new Headers();
     const previousEtag = await this.cache.etag(requestUrl);
     if (previousEtag !== undefined) headers.set('If-None-Match', previousEtag);
@@ -158,7 +163,9 @@ export class HttpSchemaSource implements SchemaSource {
     const base = uri.replace(/\/+$/, '');
     const indexUrl = `${base}/index.json`;
     const indexRequestUrl = (await this.cache.redirect(indexUrl)) ?? indexUrl;
-    assertHostAllowed(indexRequestUrl, this.scheme, allowPrivateHostsFromEnv());
+    const allowPrivate = allowPrivateHostsFromEnv();
+    assertHostAllowed(indexRequestUrl, this.scheme, allowPrivate);
+    await assertResolvedIpAllowed(indexRequestUrl, this.scheme, allowPrivate);
     const headers = new Headers();
     const previousEtag = await this.cache.etag(indexRequestUrl);
     if (previousEtag !== undefined) headers.set('If-None-Match', previousEtag);
@@ -196,7 +203,8 @@ export class HttpSchemaSource implements SchemaSource {
       filenames.map(name =>
         limit(async () => {
           const fileUrl = `${base}/${name}`;
-          assertHostAllowed(fileUrl, this.scheme, allowPrivateHostsFromEnv());
+          assertHostAllowed(fileUrl, this.scheme, allowPrivate);
+          await assertResolvedIpAllowed(fileUrl, this.scheme, allowPrivate);
           const fetchedFile = await followRedirects(
             fileUrl,
             new Headers(),
@@ -224,7 +232,17 @@ export class HttpSchemaSource implements SchemaSource {
 }
 
 /** Default per-request timeout in milliseconds, when env var is unset. */
-const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * Default cap on response body size in bytes, when env var is unset. A 5 MB
+ * cap is well above any realistic JSON Schema payload (the largest published
+ * `@schemastore` files are \<500 KB) while still bounding the OOM risk from a
+ * hostile or malfunctioning endpoint that streams gigabytes.
+ *
+ * Override via `LOOPBACK_CONTRACTS_HTTP_MAX_BYTES`.
+ */
+const DEFAULT_MAX_BODY_BYTES = 5 * 1024 * 1024;
 
 /** Maximum number of in-flight `fetch` calls during a directory walk. */
 const MAX_CONCURRENT_FETCHES = 8;
@@ -279,9 +297,26 @@ function isSingleFile(uri: string): boolean {
  */
 function httpTimeoutMsFromEnv(): number {
   const raw = process.env['LOOPBACK_CONTRACTS_HTTP_TIMEOUT_MS'];
-  if (raw === undefined || raw === '') return DEFAULT_HTTP_TIMEOUT_MS;
+  if (raw === undefined || raw === '') return DEFAULT_TIMEOUT_MS;
   const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_HTTP_TIMEOUT_MS;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_TIMEOUT_MS;
+}
+
+/**
+ * Read the response-body cap (bytes) from the env. Falls back to
+ * {@link DEFAULT_MAX_BODY_BYTES} when unset, non-numeric, or non-positive.
+ *
+ * @remarks
+ * The cap exists to keep a hostile or malfunctioning endpoint from OOMing the
+ * build by streaming gigabytes. It is enforced twice: a `Content-Length`
+ * pre-check (cheap, refuses before any body bytes are read) and a streamed
+ * byte-count tally (defends against missing/lying length headers).
+ */
+function getMaxBodyBytes(): number {
+  const raw = process.env['LOOPBACK_CONTRACTS_HTTP_MAX_BYTES'];
+  if (raw === undefined || raw === '') return DEFAULT_MAX_BODY_BYTES;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_BODY_BYTES;
 }
 
 /**
@@ -362,6 +397,74 @@ function assertHostAllowed(
 }
 
 /**
+ * Resolve `uri`'s hostname via DNS and refuse the fetch when ANY resolved
+ * address falls in a disallowed range (loopback, RFC1918, link-local, CGNAT,
+ * unique-local IPv6, multicast, IPv4-mapped IPv6 of a blocked v4, etc.).
+ *
+ * Closes the DNS-rebinding bypass that the string-only
+ * {@link assertHostAllowed} cannot defend against: a public-looking hostname
+ * can resolve to `169.254.169.254` (cloud metadata), `127.0.0.1`, RFC1918
+ * space, or IPv6 private/link-local. Called per-fetch and per-redirect-hop.
+ *
+ * @remarks
+ * `lookup({all: true, verbatim: true})` returns every A and AAAA record so
+ * dual-stack hosts are checked exhaustively — one bad address in the set is
+ * enough to abort. `verbatim: true` preserves OS-resolver ordering rather
+ * than re-sorting v4-before-v6, which keeps the test surface deterministic.
+ *
+ * IP literals in `hostname` short-circuit through {@link isBlockedHostname}'s
+ * cousins without a DNS round trip — `dns.lookup` returns the literal as-is.
+ *
+ * Skipped entirely when `allowPrivateHosts` is true (opt-in via
+ * `LOOPBACK_CONTRACTS_ALLOW_PRIVATE_HOSTS=1`).
+ */
+async function assertResolvedIpAllowed(
+  uri: string,
+  scheme: string,
+  allowPrivateHosts: boolean,
+): Promise<void> {
+  if (allowPrivateHosts) return;
+  let parsed: URL;
+  try {
+    parsed = new URL(uri);
+  } catch (cause) {
+    throw new ContractsSourceError(
+      `HTTP source received an unparseable URI: '${uri}'`,
+      {scheme, uri},
+      {cause},
+    );
+  }
+  const raw = parsed.hostname.toLowerCase();
+  const hostname =
+    raw.startsWith('[') && raw.endsWith(']') ? raw.slice(1, -1) : raw;
+  if (hostname === '') return; // assertHostAllowed already rejected it
+  // Literal IPs round-trip through dns.lookup unchanged; we still call lookup
+  // so the one code path enforces the rule against every address that would
+  // actually be dialed.
+  let addresses: ReadonlyArray<{address: string; family: number}>;
+  try {
+    addresses = await lookup(hostname, {all: true, verbatim: true});
+  } catch (cause) {
+    throw new ContractsSourceError(
+      `DNS lookup for '${hostname}' failed`,
+      {scheme, uri: redactUri(parsed)},
+      {cause},
+    );
+  }
+  for (const {address, family} of addresses) {
+    const blocked =
+      family === 4 ? isBlockedIPv4(address) : isBlockedIPv6(address);
+    if (blocked) {
+      throw new ContractsSourceError(
+        `hostname ${hostname} resolved to private/link-local IP ${address}; ` +
+          'refusing to fetch (set LOOPBACK_CONTRACTS_ALLOW_PRIVATE_HOSTS=1 to opt in)',
+        {scheme, uri: redactUri(parsed)},
+      );
+    }
+  }
+}
+
+/**
  * True when `hostname` is a loopback, link-local, RFC1918 private, or
  * `localhost`-family name. Pure function — no I/O, no DNS.
  */
@@ -378,8 +481,18 @@ function isBlockedHostname(hostname: string): boolean {
 }
 
 /**
- * Match IPv4 literals in `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`,
- * `169.254.0.0/16`, `192.168.0.0/16`, plus `0.0.0.0`.
+ * Match IPv4 literals in the disallowed ranges:
+ *
+ *   - `0.0.0.0/8` (unspecified)
+ *   - `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (RFC1918 private)
+ *   - `127.0.0.0/8` (loopback)
+ *   - `169.254.0.0/16` (link-local, includes the cloud-metadata endpoint
+ *     `169.254.169.254`)
+ *   - `100.64.0.0/10` (CGNAT — carrier-grade NAT space; a public-looking
+ *     hostname pinned to a CGNAT IP should not be reachable from the build)
+ *   - `224.0.0.0/4` (multicast)
+ *   - `240.0.0.0/4` (reserved for future use, includes `255.255.255.255`
+ *     broadcast)
  */
 function isBlockedIPv4(addr: string): boolean {
   const parts = addr.split('.').map(p => Number.parseInt(p, 10));
@@ -391,19 +504,24 @@ function isBlockedIPv4(addr: string): boolean {
   if (a === 169 && b === 254) return true; // link-local (incl. metadata)
   if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918
   if (a === 192 && b === 168) return true; // RFC1918
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64.0.0/10
+  if (a >= 224 && a <= 239) return true; // multicast 224.0.0.0/4
+  if (a >= 240) return true; // reserved 240.0.0.0/4 (incl. 255.255.255.255)
   return false;
 }
 
 /**
  * Match IPv6 loopback (`::1`), unspecified (`::`), unique-local (`fc00::/7`),
- * and link-local (`fe80::/10`). Conservatively also blocks IPv4-mapped IPv6
- * (`::ffff:a.b.c.d`) when the embedded IPv4 is blocked.
+ * link-local (`fe80::/10`), and multicast (`ff00::/8`). Conservatively also
+ * blocks IPv4-mapped IPv6 (`::ffff:a.b.c.d`) when the embedded IPv4 is
+ * blocked.
  */
 function isBlockedIPv6(addr: string): boolean {
   const norm = addr.toLowerCase();
   if (norm === '::' || norm === '::1') return true;
   if (/^fe[89ab][0-9a-f]?:/.test(norm)) return true; // fe80::/10
   if (/^f[cd][0-9a-f]{2}:/.test(norm)) return true; // fc00::/7
+  if (/^ff[0-9a-f]{2}:/.test(norm)) return true; // ff00::/8 multicast
   // Dotted-decimal IPv4-mapped form: ::ffff:a.b.c.d
   const mappedDotted = /^::ffff:([0-9.]+)$/.exec(norm);
   if (
@@ -607,7 +725,9 @@ async function followRedirects(
         {scheme, uri: currentUrl},
       );
     }
-    assertHostAllowed(nextUrl.toString(), scheme, allowPrivateHostsFromEnv());
+    const allowPrivate = allowPrivateHostsFromEnv();
+    assertHostAllowed(nextUrl.toString(), scheme, allowPrivate);
+    await assertResolvedIpAllowed(nextUrl.toString(), scheme, allowPrivate);
     hops++;
     if (hops > MAX_REDIRECTS) {
       throw new ContractsSourceError(
@@ -621,19 +741,58 @@ async function followRedirects(
 
 /**
  * Read the response body as UTF-8 text under a fresh per-call timeout that
- * shares the connection-phase {@link AbortController}. A slow-drip server
- * that returns headers promptly but trickles bytes would otherwise bypass
- * the connection-phase timer. Reuses {@link httpTimeoutMsFromEnv} so the
- * body and connection share one budget knob.
+ * shares the connection-phase {@link AbortController}, AND enforce a hard cap
+ * on body size to defend against an OOM-via-giant-payload DoS.
  *
- * Throws a {@link ContractsSourceError} on body-read timeout or any other
- * read-side failure.
+ * Two-layer cap:
+ *
+ *   1. **`Content-Length` pre-check.** If the header is present and exceeds
+ *      `getMaxBodyBytes()`, throw immediately — no body bytes are read.
+ *   2. **Streamed byte tally.** Headers can be missing or lie about the
+ *      length. Read the body chunk-by-chunk via `response.body.getReader()`,
+ *      tracking `bytesRead` after each chunk. If the running total exceeds
+ *      the cap, abort the request controller (releases the socket) and
+ *      throw.
+ *
+ * On a clean completion, concatenate the accumulated `Uint8Array` chunks
+ * into one buffer and decode as UTF-8. The buffer is allocated once at the
+ * end — interim chunks live in a small array — so peak memory is roughly
+ * `2 × bytesRead` worst case, still bounded by the cap.
+ *
+ * @remarks
+ * **Slow-drip protection.** The body-read timer aborts the same controller
+ * the connection phase used, so a server that returns headers promptly but
+ * trickles bytes can no longer outlive {@link httpTimeoutMsFromEnv}.
+ *
+ * **Concurrent fetches under abort.** Each {@link safeFetch} call owns its
+ * own `AbortController`; aborting one (whether for timeout or overrun) does
+ * not cancel siblings. In a directory walk, a single oversize file rejects
+ * the `Promise.all` immediately but in-flight peers continue downloading
+ * until they settle. Their byte counts are still bounded by the same cap.
+ *
+ * Throws a {@link ContractsSourceError} on overrun, body-read timeout, or
+ * any other read-side failure.
  */
 async function readBodyText(
   fetched: SafeFetchResult,
   url: string,
   scheme: string,
 ): Promise<string> {
+  const cap = getMaxBodyBytes();
+  const declared = fetched.response.headers.get('content-length');
+  if (declared !== null && declared !== '') {
+    const declaredN = Number.parseInt(declared, 10);
+    if (Number.isFinite(declaredN) && declaredN > cap) {
+      // Refuse before reading a single byte — the cheap path.
+      fetched.controller.abort();
+      throw new ContractsSourceError(
+        `HTTP body from '${url}' exceeds max bytes ` +
+          `(header reports ${declaredN}, cap ${cap})`,
+        {scheme, uri: url},
+      );
+    }
+  }
+
   const timeoutMs = httpTimeoutMsFromEnv();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const bodyTimeout = new Promise<never>((_resolve, reject) => {
@@ -651,7 +810,10 @@ async function readBodyText(
     timer.unref();
   });
   try {
-    return await Promise.race([fetched.response.text(), bodyTimeout]);
+    return await Promise.race([
+      readBodyStreamed(fetched, url, scheme, cap),
+      bodyTimeout,
+    ]);
   } catch (cause) {
     if (cause instanceof ContractsSourceError) throw cause;
     throw new ContractsSourceError(
@@ -662,6 +824,57 @@ async function readBodyText(
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+/**
+ * Drain `fetched.response.body` chunk-by-chunk, tallying bytes against `cap`
+ * and aborting mid-stream if the running total exceeds it. Returns the
+ * concatenated UTF-8 decoding of every accumulated chunk on clean completion.
+ *
+ * Split out from {@link readBodyText} so the body-timeout `Promise.race` has
+ * a single clean awaitable to compete with.
+ */
+async function readBodyStreamed(
+  fetched: SafeFetchResult,
+  url: string,
+  scheme: string,
+  cap: number,
+): Promise<string> {
+  const body = fetched.response.body;
+  // A null body (e.g., HEAD-style empty) is treated as the empty string.
+  if (body === null) return '';
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytesRead = 0;
+  for (;;) {
+    const {value, done} = await reader.read();
+    if (done) break;
+    if (value === undefined) continue;
+    bytesRead += value.byteLength;
+    if (bytesRead > cap) {
+      // Release the socket immediately — we will not consume the rest.
+      fetched.controller.abort();
+      try {
+        await reader.cancel();
+      } catch {
+        // Cancellation best-effort; the abort already detached the socket.
+      }
+      throw new ContractsSourceError(
+        `HTTP body from '${url}' exceeds max bytes ` +
+          `(streamed ${bytesRead} bytes, cap ${cap})`,
+        {scheme, uri: url},
+      );
+    }
+    chunks.push(value);
+  }
+  // Single allocation at the end so peak memory stays bounded by the cap.
+  const combined = new Uint8Array(bytesRead);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder('utf-8').decode(combined);
 }
 
 /** Throw a structured error for any non-success, non-304 status. */

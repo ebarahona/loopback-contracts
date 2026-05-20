@@ -365,6 +365,48 @@ export function buildLoopbackConfigMetaSchema(
           },
         },
       },
+      // Security-posture configuration — see `SecurityConfig` in
+      // `loopback-config.interface.ts`. Each sub-object is closed
+      // (`additionalProperties: false`) so a typo like `securtiy.http.timeoutMs`
+      // OR `security.http.timeOutMs` fails the stage-5 strict-kinds pass
+      // instead of silently being ignored. Numeric fields require a
+      // positive integer; zero/negative are rejected to keep the
+      // back-compat defaults the only "no-op" option.
+      security: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          http: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              timeoutMs: {type: 'integer', minimum: 1},
+              maxBodyBytes: {type: 'integer', minimum: 1},
+              allowPrivateHosts: {type: 'boolean'},
+              verifyResolvedIps: {type: 'boolean'},
+              allowedHosts: {type: 'array', items: {type: 'string'}},
+              allowRedirects: {type: 'boolean'},
+              maxRedirects: {type: 'integer', minimum: 1},
+            },
+          },
+          emitters: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              allowProjectManifests: {type: 'boolean'},
+              allowedKinds: {type: 'array', items: {type: 'string'}},
+            },
+          },
+          codegen: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              runTsc: {type: 'boolean'},
+              trustedProject: {type: 'boolean'},
+            },
+          },
+        },
+      },
     },
     $defs: {
       modelConfig: modelConfigShape,

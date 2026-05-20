@@ -12,7 +12,8 @@ import createDebug from 'debug';
 import {readFile, readdir, stat} from 'node:fs/promises';
 import {dirname, isAbsolute, join, resolve} from 'node:path';
 import {ContractsValidationError} from '../helpers';
-import {EMITTER_TAG} from '../keys';
+import {ContractsBindings, EMITTER_TAG} from '../keys';
+import type {LoopbackConfigJson} from '../types';
 import {validateManifest, type EmitterManifest} from './emitter-manifest';
 import {ManifestBackedEmitter} from './manifest-backed-emitter';
 import {buildEmitterManifestMetaSchema} from './meta-schema-generator';
@@ -72,6 +73,12 @@ export class ManifestEmitterBooter implements LifeCycleObserver {
     private readonly app: Application,
     @inject('platform.contracts.project-root', {optional: true})
     private readonly projectRoot: string = process.cwd(),
+    // Optional so test harnesses that wire the booter directly (without
+    // binding a full `loopback.config.json`) keep working. When absent,
+    // every back-compat default applies — project-manifest discovery is
+    // on, no `allowedKinds` allowlist is enforced.
+    @inject(ContractsBindings.CONFIG, {optional: true})
+    private readonly config?: LoopbackConfigJson,
   ) {}
 
   async start(): Promise<void> {
@@ -103,8 +110,25 @@ export class ManifestEmitterBooter implements LifeCycleObserver {
     // diagnostic).
     const builtinDir = join(__dirname, '..', 'emitters', 'manifest');
     const builtinFiles = await listBuiltinManifestFiles(builtinDir);
-    const projectDir = join(this.projectRoot, 'emitters');
-    const projectFiles = await listManifestFiles(projectDir);
+    // `security.emitters.allowProjectManifests = false` disables the
+    // project-local discovery scan entirely (built-in manifests still
+    // register — they ship with the plugin and are part of its trusted
+    // surface). Default is `true`, preserving back-compat for every
+    // existing project that hasn't opted in to a security block. Logged
+    // at info level so a hardened-CI run greps confirm the gate fired.
+    const securityEmitters = this.config?.security?.emitters;
+    const allowProjectManifests =
+      securityEmitters?.allowProjectManifests !== false;
+    let projectFiles: string[] = [];
+    if (allowProjectManifests) {
+      const projectDir = join(this.projectRoot, 'emitters');
+      projectFiles = await listManifestFiles(projectDir);
+    } else {
+      debug(
+        'manifest emitter discovery disabled by ' +
+          'security.emitters.allowProjectManifests=false',
+      );
+    }
     const manifestFiles: {file: string; origin: 'builtin' | 'project'}[] = [
       ...builtinFiles.map(f => ({file: f, origin: 'builtin' as const})),
       ...projectFiles.map(f => ({file: f, origin: 'project' as const})),
@@ -113,6 +137,14 @@ export class ManifestEmitterBooter implements LifeCycleObserver {
 
     const ajv = new Ajv2020({allErrors: true, strict: false});
     const validateMeta = ajv.compile(buildEmitterManifestMetaSchema());
+
+    // `security.emitters.allowedKinds` (when set) is a closed allowlist —
+    // any discovered manifest whose `kind` is NOT in the list is dropped
+    // post-validation. Undefined means "no allowlist" (every discovered
+    // kind registers). Cheap O(1) lookup via Set.
+    const allowedKinds = securityEmitters?.allowedKinds;
+    const allowedKindsSet =
+      allowedKinds !== undefined ? new Set(allowedKinds) : undefined;
 
     for (const {file, origin} of manifestFiles) {
       const raw = await readJson(file);
@@ -128,6 +160,17 @@ export class ManifestEmitterBooter implements LifeCycleObserver {
         );
       }
       const manifest = validateManifest(raw);
+      if (
+        allowedKindsSet !== undefined &&
+        !allowedKindsSet.has(manifest.kind)
+      ) {
+        debug(
+          'manifest emitter %r dropped by security.emitters.allowedKinds (file=%s)',
+          manifest.kind,
+          file,
+        );
+        continue;
+      }
       const templatePath = resolveTemplatePath(file, manifest);
       // Per-output template paths in plural-form manifests:
       //   - Absolute paths pass through unchanged.

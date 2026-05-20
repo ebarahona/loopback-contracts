@@ -26,6 +26,7 @@ export type {
   SchemaSource,
   SchemaSourceDescriptor,
   SchemaSourceResult,
+  SecurityConfig,
   SourceExtension,
   SourceExtensionResult,
   TemplateEngine,

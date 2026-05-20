@@ -262,6 +262,90 @@ Full reference (interface contracts, lifecycle, versioning policy, comprehensive
 
 Both paths register through the same `EMITTER_TAG` binding and follow the same `ProjectionEmitter` lifecycle. The manifest path is intentionally lower-friction: a project author with no TS publishing infrastructure can ship a new envelope-format emitter as two files committed to their own repo. The engine's `ManifestEmitterBooter` loads them at boot.
 
+## Security configuration
+
+The optional `security` block in `loopback.config.json` is a single place to harden the engine for CI / production runs. Every sub-section is independent and every field has a documented default that preserves pre-existing behaviour, so adding the block to an existing project is a no-op until at least one sub-key is set.
+
+The block is validated against the generated `_meta/loopback-config.schema.json` at stage 5, so typos like `security.codegen.runTSC` fail loud with an `instancePath` pointer instead of silently being ignored.
+
+```jsonc
+{
+  "security": {
+    "http": {
+      "timeoutMs": 30000, // per-request timeout in ms (mitigates slowloris)
+      "maxBodyBytes": 5242880, // 5 MB response cap (mitigates memory exhaustion)
+      "allowPrivateHosts": false, // forbid SSRF against private/loopback IPs
+      "verifyResolvedIps": true, // re-check IP after redirects (mitigates DNS rebinding)
+      "allowedHosts": [], // unset = no allowlist; set = closed egress surface
+      "allowRedirects": true,
+      "maxRedirects": 10,
+    },
+    "emitters": {
+      "allowProjectManifests": true, // scan <projectRoot>/emitters/*.emitter.json
+      "allowedKinds": [], // unset = every discovered kind registers
+    },
+    "codegen": {
+      "runTsc": true, // invoke `tsc --noEmit` at stage 8
+      "trustedProject": true, // reserved for a future wave (engine file writes)
+    },
+  },
+}
+```
+
+### Default (hobby) — everything implicit
+
+```jsonc
+{
+  "name": "hobby-app",
+  "schemasDir": "./schemas",
+  "configsDir": "./configs",
+  "validator": "ajv",
+  "schemas": ["./schemas"],
+  "emit": {"zod": true, "types": true},
+  // No `security` block. Equivalent to the documented defaults above.
+}
+```
+
+### Hardened CI — explicit lockdown
+
+```jsonc
+{
+  "name": "hardened-ci-app",
+  "schemasDir": "./schemas",
+  "configsDir": "./configs",
+  "validator": "ajv",
+  "schemas": ["./schemas"],
+  "emit": {"zod": true, "types": true},
+  "security": {
+    "http": {
+      "timeoutMs": 10000,
+      "maxBodyBytes": 1048576,
+      "allowPrivateHosts": false,
+      "verifyResolvedIps": true,
+      "allowedHosts": ["schemas.my-org.dev"],
+      "allowRedirects": false,
+      "maxRedirects": 1,
+    },
+    "emitters": {
+      "allowProjectManifests": false,
+      "allowedKinds": ["zod", "types", "openapi-components"],
+    },
+    "codegen": {
+      "runTsc": true,
+      "trustedProject": true,
+    },
+  },
+}
+```
+
+### Per-section behaviour
+
+- **`security.http.*`** — gates the engine's HTTP/HTTPS schema fetcher. Partially honored today via env-var fallbacks (`LB_CONTRACTS_HTTP_MAX_BYTES`, `LB_CONTRACTS_HTTP_TIMEOUT_MS`, etc.); the formal config plumbing into `http-source.ts` lands across subsequent waves. The field surface is committed today so consumer configs can opt in now and the env-var path is deprecated cleanly when the wiring lands.
+- **`security.emitters.allowProjectManifests`** — when `false`, `ManifestEmitterBooter` skips the `<projectRoot>/emitters/*.emitter.json` discovery scan (built-in manifests shipped with the plugin still register). Pin to `false` in CI to keep an attacker who can drop a `*.emitter.json` into the tree from registering a code-execution path through the template engine.
+- **`security.emitters.allowedKinds`** — when set, every discovered manifest whose `kind` is not in the list is dropped at boot (logged under `DEBUG=loopback:contracts:manifest-emitter-booter`). Unset means "every discovered kind registers".
+- **`security.codegen.runTsc`** — when `false`, stage 8 (`tsc --noEmit`) is skipped without needing the CLI `--skip-tsc` flag. Useful when the project already runs `tsc` separately in CI. The CLI `--skip-tsc` flag remains and OR's with this setting.
+- **`security.codegen.trustedProject`** — reserved for a future wave that will gate engine file writes on this flag. Declared today so consumer configs can opt in early without a schema bump later.
+
 ## Stability and semver
 
 Every exported symbol carries exactly one stability tag: `@public`, `@experimental`, or `@internal`. The rules and rationale are documented in [STYLE_GUIDE.md](./STYLE_GUIDE.md) § Stability tags.

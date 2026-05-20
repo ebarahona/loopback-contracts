@@ -37,13 +37,24 @@ function resolveGitTimeoutMs(): number {
  *
  * The fetch strategy is content-addressed: each `git+<transport>://...#<ref>`
  * URI hashes to a cache directory under
- * `<projectRoot>/.loopback/cache/schemas/<sha256-of-redacted-uri>/`. Because
+ * `<projectRoot>/.loopback/cache/schemas/<host-slug>-<sha256:16>/`. Because
  * the ref is part of the URI, bumping the pin changes the hash and forces a
  * fresh clone — the previous pin's cache is left intact for downgrades. The
- * cache key is computed from the credential-redacted URI so the on-disk path
- * never embeds `user:pass@host` secrets. The cache is treated as
- * authoritative when present and never expires on its own; delete
- * `.loopback/cache/schemas/` to force a re-fetch.
+ * cache key is computed from the RAW URI (credentials included) so two
+ * callers pointing at the same repo+ref with different credentials get
+ * distinct cache directories — a low-privilege CI run cannot read a
+ * high-privilege run's payload on a shared workspace. The on-disk
+ * directory name embeds only the SHA-256 hash of the raw URI plus a
+ * credential-free hostname slug; the `user:pass@host` segment itself is
+ * never written to disk. The cache is treated as authoritative when
+ * present and never expires on its own; delete `.loopback/cache/schemas/`
+ * to force a re-fetch.
+ *
+ * @remarks One-time re-fetch on upgrade from earlier 0.1.x: the cache-key
+ * input changed from the redacted URI to the raw URI, so old entries are
+ * orphaned and the next fetch repopulates the cache. The orphaned
+ * directories are harmless — delete `.loopback/cache/schemas/` to reclaim
+ * the disk space.
  *
  * Authentication is delegated to git itself — we do not read tokens from
  * the environment. SSH URIs use the user's `~/.ssh/` keys; HTTPS URIs use
@@ -98,20 +109,26 @@ export class GitSchemaSource implements SchemaSource {
   async fetch(uri: string): Promise<SchemaSourceResult> {
     const safeUri = redactUrl(uri);
     const {repoUrl, ref} = parseGitUri(uri, this.scheme, safeUri);
-    const cached = await this.cache.read(safeUri);
+    // Cache key derives from the RAW `uri` (credentials included) so two
+    // callers pointing at the same repo+ref with different credentials get
+    // distinct cache directories — a low-privilege CI run cannot read a
+    // high-privilege run's payload on a shared workspace. `safeUri` is for
+    // operator-visible strings only (manifest `source` field, error
+    // messages, debug logs).
+    const cached = await this.cache.read(uri);
     if (cached !== undefined) {
       if (!isImmutableRef(ref)) {
         debug(
           'serving mutable git ref %s from cache for %s; delete %s to refresh',
           ref,
           safeUri,
-          this.cache.cacheDir(safeUri),
+          this.cache.cacheDir(uri),
         );
       }
       return cached;
     }
 
-    const dir = this.cache.cacheDir(safeUri);
+    const dir = this.cache.cacheDir(uri);
     // The cache dir may exist from a previous failed clone; wipe and recreate
     // so `git clone` lands in an empty directory.
     await rm(dir, {recursive: true, force: true});
@@ -128,7 +145,7 @@ export class GitSchemaSource implements SchemaSource {
       }),
     );
     await this.cache.write(
-      safeUri,
+      uri,
       results,
       resolvedRef !== undefined ? {resolvedRef} : undefined,
     );

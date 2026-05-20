@@ -31,6 +31,7 @@ export type {
   LoopbackConfigJson,
   MigrationStrategy,
   SchemaSourceDescriptor,
+  SecurityConfig,
 } from './loopback-config.interface';
 
 export {

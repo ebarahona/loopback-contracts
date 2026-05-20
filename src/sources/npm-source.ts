@@ -38,7 +38,8 @@ export class NpmSchemaSource implements SchemaSource {
    *   cannot be read.
    */
   async fetch(uri: string): Promise<SchemaSourceResult> {
-    const pkg = parseNpmUri(uri, this.scheme);
+    const extracted = parseNpmUri(uri, this.scheme);
+    const pkg = parseNpmPackageName(extracted);
     const pkgRoot = resolvePackageRoot(pkg, this.projectRoot, uri, this.scheme);
     const files = await collectSchemaFiles(pkgRoot);
     const results = await Promise.all(
@@ -65,6 +66,117 @@ function parseNpmUri(uri: string, scheme: string): string {
     );
   }
   return name;
+}
+
+/**
+ * Maximum allowed npm package name length. The public npm registry rejects
+ * new packages whose names exceed 214 characters (scope and slash included);
+ * we mirror that ceiling so an unresolvable descriptor never reaches the
+ * `require.resolve` call below.
+ */
+const NPM_NAME_MAX_LENGTH = 214;
+
+/** Unscoped name body: lowercase letter/digit/underscore start, then `[a-z0-9._-]`. */
+const UNSCOPED_NAME_RE = /^[a-z0-9_][a-z0-9._-]*$/;
+
+/** Scope body (no leading `.` or `_`): `[a-z0-9]` start, then `[a-z0-9._-]`. */
+const SCOPE_RE = /^[a-z0-9][a-z0-9._-]*$/;
+
+/**
+ * Validate a raw npm package identifier against the npm registry's
+ * package-name grammar (lowercase only, no path traversal, no URL chars, no
+ * whitespace, length-bound). Returns the input unchanged when valid; throws
+ * {@link ContractsSourceError} otherwise.
+ *
+ * Pure: no I/O, no side effects. Exported for direct unit testing.
+ *
+ * Hardening note: the npm registry tolerates a handful of legacy uppercase
+ * package names; we reject uppercase outright. Authors of legacy packages
+ * must publish a lowercase alias before they can be consumed via `npm:`.
+ *
+ * @internal
+ */
+export function parseNpmPackageName(raw: string): string {
+  const scheme = 'npm';
+  const reject = (rule: string): never => {
+    throw new ContractsSourceError(
+      `Invalid npm package name '${raw}': ${rule}`,
+      {scheme, uri: `npm:${raw}`},
+    );
+  };
+
+  if (typeof raw !== 'string') {
+    return reject('expected a string descriptor');
+  }
+  // Whitespace anywhere in a package name is illegal per the npm grammar;
+  // catching it here also rejects the `npm: ` (whitespace-only) descriptor.
+  if (/\s/.test(raw)) {
+    return reject('whitespace is not allowed');
+  }
+  if (raw.length === 0) {
+    return reject('name is empty');
+  }
+  if (raw.length > NPM_NAME_MAX_LENGTH) {
+    return reject(`exceeds ${NPM_NAME_MAX_LENGTH}-character limit`);
+  }
+  // Path traversal segments and backslashes never appear in legitimate
+  // package names; block them before the grammar check so the error message
+  // names the actual problem rather than a vague regex miss.
+  if (raw.includes('..')) {
+    return reject("contains path-traversal sequence '..'");
+  }
+  if (raw.includes('\\')) {
+    return reject('contains backslash');
+  }
+  // URL-ish characters: `:` (scheme separator), `?` (query), `#` (fragment).
+  if (raw.includes(':') || raw.includes('?') || raw.includes('#')) {
+    return reject("contains URL character (':', '?', or '#')");
+  }
+
+  if (raw.startsWith('@')) {
+    // Scoped form: `@scope/name`. Exactly one `/`, with non-empty halves.
+    const slash = raw.indexOf('/');
+    if (slash === -1) {
+      return reject("scoped name missing '/' separator");
+    }
+    if (raw.indexOf('/', slash + 1) !== -1) {
+      return reject("contains more than one '/'");
+    }
+    const scope = raw.slice(1, slash);
+    const name = raw.slice(slash + 1);
+    if (scope.length === 0) {
+      return reject('scope is empty');
+    }
+    if (name.length === 0) {
+      return reject('name after scope is empty');
+    }
+    if (!SCOPE_RE.test(scope)) {
+      return reject(
+        "scope must match /^[a-z0-9][a-z0-9._-]*$/ (lowercase, no leading '.' or '_')",
+      );
+    }
+    if (!UNSCOPED_NAME_RE.test(name)) {
+      return reject(
+        'name after scope must match /^[a-z0-9_][a-z0-9._-]*$/ (lowercase only)',
+      );
+    }
+    return raw;
+  }
+
+  // Unscoped form: a leading `/` is path-traversal/absolute-path bait.
+  if (raw.startsWith('/')) {
+    return reject("starts with '/'");
+  }
+  if (raw.includes('/')) {
+    return reject("unscoped name may not contain '/'");
+  }
+  if (raw.startsWith('.')) {
+    return reject("unscoped name may not start with '.'");
+  }
+  if (!UNSCOPED_NAME_RE.test(raw)) {
+    return reject('must match /^[a-z0-9_][a-z0-9._-]*$/ (lowercase only)');
+  }
+  return raw;
 }
 
 /**

@@ -10,6 +10,7 @@ export type {
   LoopbackConfigJson,
   MigrationStrategy,
   SchemaSourceDescriptor,
+  SecurityConfig,
 } from './interfaces/loopback-config.interface';
 
 export {

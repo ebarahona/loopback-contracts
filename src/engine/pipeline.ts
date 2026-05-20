@@ -1391,6 +1391,18 @@ export class Pipeline {
   // ----- Stage 8 -------------------------------------------------------
 
   private async stage8Tsc(opts: PipelineRunOptions): Promise<boolean> {
+    // Two opt-out paths, OR'd: the CLI `--skip-tsc` flag (transient,
+    // per-invocation) AND the `security.codegen.runTsc` config field
+    // (persistent, per-project). `runTsc === false` is the explicit
+    // opt-out; an absent or `true` value keeps the default behaviour
+    // (run the gate) so existing configs without a `security` block see
+    // no change. Logged at info level so a CI run grep'ing for the line
+    // can confirm the gate was deliberately bypassed.
+    const runTscOptIn = opts.config.security?.codegen?.runTsc;
+    if (runTscOptIn === false) {
+      debug('stage 8: tsc skipped — security.codegen.runTsc = false');
+      return true;
+    }
     if (opts.skipTsc) return true;
     const tsconfig = join(opts.projectRoot, 'tsconfig.json');
     if (!existsSync(tsconfig)) {

@@ -1,7 +1,7 @@
 import {mkdir, readFile, rename, rm, unlink, writeFile} from 'node:fs/promises';
 import {createHash, randomBytes} from 'node:crypto';
 import {join, resolve} from 'node:path';
-import {ContractsSourceError} from '../helpers';
+import {ContractsSourceError, redactUrl} from '../helpers';
 import type {SchemaSourceResult} from '../interfaces';
 
 /**
@@ -60,6 +60,19 @@ interface RedirectFile {
  * redirect target. The cache is shared infrastructure for the git and HTTP
  * sources — it is intentionally not itself a {@link SchemaSource}.
  *
+ * Cache directory names are `<hostname-slug>-<sha256-of-RAW-uri:16>`. The
+ * raw URI (credentials included) is the input to the hash so two callers
+ * pointing at the same repo+ref with different credentials get distinct
+ * cache directories — a low-privilege CI job cannot read schemas a
+ * high-privilege job cached on a shared workspace. The hostname slug
+ * prefix has credentials stripped (it is purely an operator-readability
+ * hint visible from `ls .loopback/cache/schemas/`).
+ *
+ * @remarks One-time re-fetch on upgrade: callers that previously passed a
+ * credential-redacted URI as the cache key will not find their old entries
+ * after this hash-input change. The orphaned directories are harmless and
+ * the next fetch repopulates the cache.
+ *
  * Invalidation is explicit: callers ({@link GitSchemaSource},
  * {@link HttpSchemaSource}) compare the freshly fetched payload's identity
  * (git SHA, HTTP `ETag`) against the cached entry and call
@@ -101,10 +114,27 @@ export class SchemaSourceCache {
    * Absolute path to the per-URI cache directory. The directory is *not*
    * created by this method — callers create it lazily on the first
    * {@link write} call.
+   *
+   * The input MUST be the RAW URI (credentials included, when present). The
+   * directory name is `<hostname-slug>-<sha256(uri):16>`:
+   *
+   * - `sha256(uri):16` — first 16 hex chars (64 bits, ~10^19 keyspace) of
+   *   the SHA-256 digest of the raw URI. Including credentials in the hash
+   *   input is load-bearing: two callers pointing at the same repo+ref with
+   *   different credentials MUST get different cache directories so a
+   *   low-privilege CI run cannot read a high-privilege run's payload.
+   * - `hostname-slug` — non-secret, lowercased, alnum-only hostname prefix
+   *   (up to 12 chars) so `ls .loopback/cache/schemas/` is still
+   *   intelligible to a human. Credentials are stripped before slugging.
+   *   Falls back to `unknown` when the URI does not parse as a URL.
+   *
+   * Callers MUST NOT pre-redact the URI before passing it here — the
+   * credentials in the URI are part of the cache identity. The redacted
+   * form is for human-readable error messages only.
    */
   cacheDir(uri: string): string {
-    const digest = createHash('sha256').update(uri).digest('hex');
-    return join(this.root, digest);
+    const hash = createHash('sha256').update(uri).digest('hex').slice(0, 16);
+    return join(this.root, `${hostnameSlug(uri)}-${hash}`);
   }
 
   /**
@@ -114,8 +144,16 @@ export class SchemaSourceCache {
    * or malformed entry objects) raise a {@link ContractsSourceError} so a
    * corrupted-but-syntactically-valid cache cannot silently feed bad data
    * downstream.
+   *
+   * `uri` is the RAW URI (credentials included, when present). The cache
+   * directory lookup uses the SHA-256 hash of the raw URI so credentials
+   * stay part of the cache identity, but the on-disk manifest stores only
+   * the credential-redacted form — credentials are never written to disk.
+   * The structural-validation check therefore compares the manifest's
+   * `uri` field against the redacted input, not the raw one.
    */
   async read(uri: string): Promise<SchemaSourceResult | undefined> {
+    const safeUri = redactUrl(uri);
     const manifestPath = join(this.cacheDir(uri), 'manifest.json');
     let raw: string;
     try {
@@ -129,14 +167,14 @@ export class SchemaSourceCache {
     } catch {
       return undefined;
     }
-    if (!isCacheManifestShape(parsed) || parsed.uri !== uri) {
+    if (!isCacheManifestShape(parsed) || parsed.uri !== safeUri) {
       throw new ContractsSourceError(
         `cache manifest at ${manifestPath} is structurally invalid`,
-        {scheme: 'n/a', uri},
+        {scheme: 'n/a', uri: safeUri},
       );
     }
     return parsed.entries.map(e => ({
-      source: uri,
+      source: safeUri,
       path: e.path,
       content: e.content,
     }));
@@ -147,14 +185,19 @@ export class SchemaSourceCache {
    * it does not already exist. The manifest is written atomically via a
    * `.tmp.<rand>` sibling + `rename`.
    *
+   * `uri` is the RAW URI (credentials included, when present). The
+   * directory name hashes the raw URI so credentials remain part of the
+   * cache identity, but the manifest's `uri` field stores only the
+   * credential-redacted form — credentials are never written to disk.
+   *
    * Sources may pass an optional `meta.resolvedRef` (e.g. a git SHA) that
    * is persisted alongside `entries` for operator inspection — the cache
    * does not read it back.
    *
    * @remarks Current single-URI cache model — the `source` field on
-   * {@link SchemaSourceResult} entries is reconstructed from `uri` on read;
-   * do not write aggregated multi-source results without persisting the
-   * `source` field on each entry.
+   * {@link SchemaSourceResult} entries is reconstructed from the manifest
+   * `uri` on read; do not write aggregated multi-source results without
+   * persisting the `source` field on each entry.
    */
   async write(
     uri: string,
@@ -164,7 +207,7 @@ export class SchemaSourceCache {
     const dir = this.cacheDir(uri);
     await mkdir(dir, {recursive: true});
     const manifest: CacheManifest = {
-      uri,
+      uri: redactUrl(uri),
       fetchedAt: new Date().toISOString(),
       entries: result.map(e => ({path: e.path, content: e.content})),
       ...(meta?.resolvedRef !== undefined
@@ -379,6 +422,47 @@ export class SchemaSourceCache {
       if (this.locks.get(path) === chained) this.locks.delete(path);
     }
   }
+}
+
+/**
+ * Maximum length of the hostname prefix in {@link SchemaSourceCache.cacheDir}
+ * output. Twelve chars is enough for `raw.githubusercontent.com` to be
+ * recognisable (`raw-githubus`) while keeping the overall directory name
+ * short on case-insensitive filesystems.
+ */
+const HOSTNAME_SLUG_MAX = 12;
+
+/**
+ * Build the human-readable, non-secret hostname slug used as the prefix of
+ * a {@link SchemaSourceCache.cacheDir} directory name. Strips any userinfo
+ * before slugging so credentials never appear in the on-disk path. Falls
+ * back to `unknown` when the URI cannot be parsed (the appended hash still
+ * disambiguates the directory uniquely).
+ *
+ * The slug is lossy and non-injective by design — directory uniqueness is
+ * provided by the SHA-256 hash suffix, not the slug.
+ */
+function hostnameSlug(uri: string): string {
+  let host = '';
+  try {
+    // `git+https://...` and `git+ssh://...` parse cleanly with the WHATWG
+    // URL parser — the `git+` prefix is treated as part of the scheme and
+    // the hostname is extracted correctly.
+    host = new URL(uri).hostname;
+  } catch {
+    // Best-effort regex fallback for any URI shape the WHATWG parser
+    // rejects. Strip credentials first so the resulting slug never embeds
+    // userinfo.
+    const stripped = uri.replace(/^([a-z][a-z0-9+.\-]*:\/\/)[^@/]+@/i, '$1');
+    const match = /^[a-z][a-z0-9+.\-]*:\/\/([^/:?#]+)/i.exec(stripped);
+    host = match?.[1] ?? '';
+  }
+  const slug = host
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, HOSTNAME_SLUG_MAX);
+  return slug || 'unknown';
 }
 
 /**
