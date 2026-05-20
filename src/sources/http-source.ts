@@ -1,6 +1,8 @@
 import {BindingScope, inject, injectable} from '@loopback/core';
+import {lookup as dnsLookupCb} from 'node:dns';
 import {lookup} from 'node:dns/promises';
 import {isIP} from 'node:net';
+import {Agent, fetch as undiciFetch, type Dispatcher} from 'undici';
 import {ContractsSourceError} from '../helpers';
 import type {SchemaSource, SchemaSourceResult} from '../interfaces';
 import {ContractsBindings, SOURCE_TAG} from '../keys';
@@ -75,6 +77,13 @@ export class HttpSchemaSource implements SchemaSource {
     // force and no allowlist is enforced.
     @inject(ContractsBindings.CONFIG, {optional: true})
     private readonly config?: LoopbackConfigJson,
+    // Optional dispatcher override. Tests inject an undici `MockAgent` here
+    // to intercept fetches by URL pattern; when absent the source builds a
+    // DNS-pinning {@link Agent} per-fetch via {@link buildPinnedDispatcher}.
+    // Production callers should never set this — the per-call pinned
+    // dispatcher is the load-bearing safety net for the DNS-rebinding /
+    // TOCTOU window described on {@link assertResolvedIpAllowed}.
+    private readonly dispatcherOverride?: Dispatcher,
   ) {
     this.cache = new SchemaSourceCache(this.projectRoot);
   }
@@ -93,10 +102,24 @@ export class HttpSchemaSource implements SchemaSource {
     const options = this.resolveHttpSecurity();
     assertHostAllowed(uri, this.scheme, options);
     await assertResolvedIpAllowed(uri, this.scheme, options);
+    const dispatcher = this.dispatcherFor(options);
     if (isSingleFile(uri)) {
-      return this.fetchSingle(uri, options);
+      return this.fetchSingle(uri, options, dispatcher);
     }
-    return this.fetchDirectory(uri, options);
+    return this.fetchDirectory(uri, options, dispatcher);
+  }
+
+  /**
+   * Resolve the {@link Dispatcher} that backs every `fetch` issued during
+   * this call. When a test-only `dispatcherOverride` was injected (e.g., a
+   * `MockAgent`), it wins; otherwise a freshly-built DNS-pinning {@link Agent}
+   * is returned so the lookup hook closes the connect-time TOCTOU window
+   * described on {@link assertResolvedIpAllowed}.
+   *
+   * @internal
+   */
+  private dispatcherFor(options: HttpSecurityOptions): Dispatcher {
+    return this.dispatcherOverride ?? buildPinnedDispatcher(options);
   }
 
   /**
@@ -150,6 +173,7 @@ export class HttpSchemaSource implements SchemaSource {
   private async fetchSingle(
     uri: string,
     options: HttpSecurityOptions,
+    dispatcher: Dispatcher,
     attempt = 0,
   ): Promise<SchemaSourceResult> {
     const requestUrl = (await this.cache.redirect(uri)) ?? uri;
@@ -164,6 +188,7 @@ export class HttpSchemaSource implements SchemaSource {
       headers,
       this.scheme,
       options,
+      dispatcher,
     );
     const res = fetched.response;
     if (res.status === 304) {
@@ -180,7 +205,7 @@ export class HttpSchemaSource implements SchemaSource {
       // ETag and the redirect mapping, then re-issue an unconditional GET.
       await this.cache.invalidate(requestUrl);
       await this.cache.invalidate(uri);
-      return this.fetchSingle(uri, options, attempt + 1);
+      return this.fetchSingle(uri, options, dispatcher, attempt + 1);
     }
     assertOk(res, fetched.finalUrl, this.scheme);
     const content = await readBodyText(
@@ -210,6 +235,7 @@ export class HttpSchemaSource implements SchemaSource {
   private async fetchDirectory(
     uri: string,
     options: HttpSecurityOptions,
+    dispatcher: Dispatcher,
     attempt = 0,
   ): Promise<SchemaSourceResult> {
     const base = uri.replace(/\/+$/, '');
@@ -226,6 +252,7 @@ export class HttpSchemaSource implements SchemaSource {
       headers,
       this.scheme,
       options,
+      dispatcher,
     );
     const indexRes = fetchedIndex.response;
     if (indexRes.status === 304) {
@@ -240,7 +267,7 @@ export class HttpSchemaSource implements SchemaSource {
       await this.cache.invalidate(uri);
       await this.cache.invalidate(indexUrl);
       await this.cache.invalidate(indexRequestUrl);
-      return this.fetchDirectory(uri, options, attempt + 1);
+      return this.fetchDirectory(uri, options, dispatcher, attempt + 1);
     }
     assertOk(indexRes, fetchedIndex.finalUrl, this.scheme);
     const indexBody = await readBodyText(
@@ -263,6 +290,7 @@ export class HttpSchemaSource implements SchemaSource {
             new Headers(),
             this.scheme,
             options,
+            dispatcher,
           );
           assertOk(fetchedFile.response, fetchedFile.finalUrl, this.scheme);
           const content = await readBodyText(
@@ -531,13 +559,14 @@ function assertHostAllowed(
  * the DNS-rebinding risk — only do so for trusted intranets where every
  * resolved IP is known good.
  *
- * **Residual TOCTOU window.** This check is a preflight resolution. Node's
- * `fetch` (undici) re-resolves DNS when it actually opens the socket, so
- * an attacker controlling fast-changing DNS could in principle rebind
- * between this check and the connect. The mitigation is best-effort at
- * the preflight tier; landing a transport-level dispatcher with a
- * connect-time lookup callback is tracked separately. Pair with an egress
- * proxy or pin DNS for defence-in-depth.
+ * **TOCTOU closure.** This preflight stays for early fail-fast UX (operator
+ * gets a clear error before any connection attempt), but the load-bearing
+ * defence against the connect-time TOCTOU / DNS-rebinding window is the
+ * undici {@link Agent} built by {@link buildPinnedDispatcher}: its
+ * `connect.lookup` hook runs the SAME private-IP checks INSIDE undici's
+ * socket-establishment, so the address validated is the address dialed.
+ * Preflight + connect-time DNS pin via undici dispatcher closes the
+ * TOCTOU window.
  */
 async function assertResolvedIpAllowed(
   uri: string,
@@ -668,6 +697,87 @@ function isBlockedIPv6(addr: string): boolean {
   return false;
 }
 
+/**
+ * True when `address` (a literal IP returned by a DNS lookup) falls in any
+ * of the IPv4 or IPv6 ranges denied by {@link isBlockedIPv4} /
+ * {@link isBlockedIPv6}. Centralises the address-classification rule so the
+ * preflight {@link assertResolvedIpAllowed} and the connect-time lookup
+ * hook in {@link buildPinnedDispatcher} apply the SAME predicate — drift
+ * between the two tiers would re-open the TOCTOU window the dispatcher is
+ * here to close.
+ *
+ * @internal
+ */
+function isBlockedResolvedAddress(address: string, family: number): boolean {
+  if (family === 6) return isBlockedIPv6(address);
+  // Anything not explicitly tagged IPv6 is treated as IPv4; `dns.lookup`
+  // returns `family: 4` for v4 literals and `family: 6` for v6 literals, so
+  // the default branch matches the v4 path naturally.
+  return isBlockedIPv4(address);
+}
+
+/**
+ * Build a DNS-pinning undici {@link Agent} whose `connect.lookup` hook runs
+ * INSIDE undici's socket-establishment phase — so the IP undici dials is
+ * the IP we just classified. Closes the connect-time TOCTOU window that
+ * the string-only {@link assertHostAllowed} and the preflight-only
+ * {@link assertResolvedIpAllowed} cannot defend against on their own (an
+ * attacker controlling fast-changing DNS could rebind between preflight
+ * and connect; this hook fires at connect time so there is no window).
+ *
+ * Honours the same `allowPrivateHosts` / `verifyResolvedIps` opt-outs as
+ * the preflight: when either is set, the hook short-circuits to the plain
+ * `dns.lookup` answer without applying the deny list, preserving the
+ * intranet escape hatch.
+ *
+ * @internal
+ */
+function buildPinnedDispatcher(options: HttpSecurityOptions): Dispatcher {
+  const enforce = !options.allowPrivateHosts && options.verifyResolvedIps;
+  // Typed as `unknown` for the `lookup` slot because undici's exported
+  // `BuildOptions` is the union of Node's TCP and TLS connect-opts, and
+  // both surface `lookup` with overload-heavy signatures that fight a
+  // single inline arrow. The shape we hand undici matches its runtime
+  // expectation (drop-in for `dns.lookup`); a typed local alias would
+  // be churnier than the targeted cast at the call site.
+  const lookupHook = (
+    hostname: string,
+    lookupOpts: {family?: number; hints?: number; all?: boolean} | undefined,
+    callback: (
+      err: NodeJS.ErrnoException | null,
+      address: string,
+      family: number,
+    ) => void,
+  ): void => {
+    // Force the single-result callback shape — `all: true` would change the
+    // callback signature to `(err, addresses[])`, breaking the deny check.
+    const opts = {...(lookupOpts ?? {}), all: false as const};
+    dnsLookupCb(hostname, opts, (err, address, family) => {
+      if (err !== null && err !== undefined) {
+        // Preserve the original DNS-failure signal so callers see the real
+        // `ENOTFOUND` / `EAI_AGAIN` rather than a synthesised one.
+        return callback(err, '', 0);
+      }
+      if (enforce && isBlockedResolvedAddress(address, family)) {
+        const blockErr: NodeJS.ErrnoException = new Error(
+          `hostname ${hostname} resolved to private/link-local IP ` +
+            `${address} at connect time; refusing (set ` +
+            'security.http.allowPrivateHosts=true or ' +
+            'LOOPBACK_CONTRACTS_ALLOW_PRIVATE_HOSTS=1 to opt in)',
+        );
+        blockErr.code = 'LB4_CONTRACTS_DNS_REBIND_BLOCKED';
+        return callback(blockErr, '', 0);
+      }
+      callback(null, address, family);
+    });
+  };
+  return new Agent({
+    connect: {
+      lookup: lookupHook as unknown as undefined,
+    },
+  });
+}
+
 /** Strip userinfo and query-string from a URL before embedding in errors. */
 function redactUri(url: URL): string {
   return `${url.protocol}//${url.host}${url.pathname}`;
@@ -750,6 +860,7 @@ async function safeFetch(
   headers: Headers,
   scheme: string,
   timeoutMs: number,
+  dispatcher: Dispatcher,
 ): Promise<SafeFetchResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -757,11 +868,15 @@ async function safeFetch(
   // alive past resolution — the `finally` block clears it on every path.
   timer.unref();
   try {
-    const response = await fetch(url, {
-      headers,
+    // `headers` is a WHATWG `Headers` instance — undici accepts it but
+    // its types narrow to its own `HeadersInit`, so cast via `unknown` to
+    // satisfy both bindings without copying the header pairs.
+    const response = (await undiciFetch(url, {
+      headers: headers as unknown as Record<string, string>,
       redirect: 'manual',
       signal: controller.signal,
-    });
+      dispatcher,
+    })) as unknown as Response;
     return {response, controller, finalUrl: url};
   } catch (cause) {
     const code =
@@ -820,6 +935,7 @@ async function followRedirects(
   headers: Headers,
   scheme: string,
   options: HttpSecurityOptions,
+  dispatcher: Dispatcher,
 ): Promise<SafeFetchResult> {
   let currentUrl = url;
   let hops = 0;
@@ -829,6 +945,7 @@ async function followRedirects(
       headers,
       scheme,
       options.timeoutMs,
+      dispatcher,
     );
     const res = fetched.response;
     if (!REDIRECT_STATUSES.has(res.status)) {

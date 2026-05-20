@@ -27,7 +27,7 @@
     "test:dev": "vitest",
     "commitlint": "commitlint --edit",
     "prepare": "sh scripts/install-hooks.sh",
-    "prepublishOnly": "npm run clean && npm run build",
+    "prepublishOnly": "npm run clean && npm run build && npm test",
     "bench": "node bench/index.mjs",
     "docs": "typedoc",
     "cli": "node bin/lb-contracts.js"
@@ -105,7 +105,8 @@
     "chokidar": "^4.0.3",
     "debug": "^4.4.0",
     "ejs": "^3.1.10",
-    "jsonc-parser": "^3.3.1"
+    "jsonc-parser": "^3.3.1",
+    "undici": "^7.25.0"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.0.1",
@@ -143,10 +144,16 @@
     "zod": ">=3.22.0 <5.0.0"
   },
   "files": [
-    "dist",
-    "bin",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/templates/**/*.ejs",
+    "dist/emitters/manifest/**/*.json",
+    "dist/emitters/manifest/**/*.ejs",
+    "bin/**",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "publishConfig": {
     "access": "public"
