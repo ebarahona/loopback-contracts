@@ -1,16 +1,16 @@
 import type {JSONSchema} from './emitter-context.interface';
 
 /**
- * Plugin-contributed entry for the `lb4 contract` source-selection prompt.
+ * Plugin-contributed entry for the `lb-contracts contract` source-selection prompt.
  *
  * `loopback-contracts-import` is the canonical consumer: each importer
  * (`zod`, `openapi`, `wsdl`, `avro`, `proto`, `graphql-sdl`, `asyncapi`,
- * `live-db`, …) registers a `SourceExtension` so the `lb4 contract`
+ * `live-db`, …) registers a `SourceExtension` so the `lb-contracts contract`
  * interactive wizard can offer "Import from <format>" alongside the
  * built-in "Author from scratch" path. Selecting an entry runs the
  * importer's {@link SourceExtension.invoke}, which writes the new
  * `schemas/*.schema.json` (and optional `configs/*.config.json`) the
- * contracts engine then picks up on the next `lb4 gen`.
+ * contracts engine then picks up on the next `lb-contracts gen`.
  *
  * @experimental
  */

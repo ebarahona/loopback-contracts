@@ -38,7 +38,7 @@ interface RelationRepoView {
   /**
    * Base-repository class name used for the TYPE annotation only (e.g.
    * `CustomerBaseRepository`). Imported from the always-regenerated base
-   * file so the type resolves on the first `lb4 gen` run.
+   * file so the type resolves on the first `lb-contracts gen` run.
    */
   targetRepoClass: string;
   /**
@@ -105,7 +105,7 @@ export class RepositoryGenerator implements ProjectionEmitter {
   }
 
   /**
-   * Back-compat entry point used by `lb4 override repository` (see
+   * Back-compat entry point used by `lb-contracts override repository` (see
    * `src/cli/commands/override.ts`). New callers should register the
    * generator as a {@link ProjectionEmitter} and let the engine invoke
    * {@link emit} per the standard discovery flow.
@@ -176,7 +176,7 @@ export class RepositoryGenerator implements ProjectionEmitter {
     const idType = pickIdType(schema, config);
     const dataSourceName = config.dataSource;
     // Base files must only import from sibling base files (extensions are
-    // skipIfExists and may not exist on first `lb4 gen`). The DI tag
+    // skipIfExists and may not exist on first `lb-contracts gen`). The DI tag
     // `datasources.<name>` still routes to the user-extended class at
     // runtime via LB4's binding-key resolution.
     const dataSourceClass = `${toPascal(dataSourceName)}BaseDataSource`;
@@ -245,7 +245,7 @@ export class RepositoryGenerator implements ProjectionEmitter {
       // Base repositories must only import sibling *Base* symbols from
       // `.base.*` files. The extension files (`<name>.model.ts` /
       // `<name>.repository.ts`) are `skipIfExists` and may not exist on
-      // the first `lb4 gen` run, so resolving via `ctx.importMap` (which
+      // the first `lb-contracts gen` run, so resolving via `ctx.importMap` (which
       // points at the extension) would emit a dangling import. Pin both
       // paths and class names to the always-regenerated base files.
       const targetImportPath = `../models/${targetKebab}.base.model`;
@@ -276,8 +276,8 @@ export class RepositoryGenerator implements ProjectionEmitter {
 
 function relRepoImport(targetKebab: string): string {
   // Repository files live under `src/repositories/`; cross-references resolve
-  // to the always-regenerated base file so the first `lb4 gen` run compiles
-  // even before any `lb4 override repository` extension stubs exist.
+  // to the always-regenerated base file so the first `lb-contracts gen` run compiles
+  // even before any `lb-contracts override repository` extension stubs exist.
   return `./${targetKebab}.base.repository`;
 }
 

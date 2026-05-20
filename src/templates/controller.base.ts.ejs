@@ -2,7 +2,7 @@
 // `Name` is bound by the generator to the *base* model class name (e.g.
 // `CustomerBase`), so every type reference below resolves against the
 // always-emitted base file even when the user has not yet run
-// `lb4 override controller`. `controllerName` keeps the bare PascalCase
+// `lb-contracts override controller`. `controllerName` keeps the bare PascalCase
 // stem (e.g. `Customer`) used for the controller class declaration, the
 // URL prefix, and local variable / repository field names.
 const Name           = name;
@@ -38,7 +38,7 @@ import {<%- Name %>Repository} from '../repositories/<%- h.kebab(ControllerName)
 /**
  * Auto-generated base controller for the `<%- ControllerName %>` contract.
  * Exposes the default seven-method LB4 CRUD surface. Do not edit; rerun
- * `lb4 gen`.
+ * `lb-contracts gen`.
  *
  * @internal
  */

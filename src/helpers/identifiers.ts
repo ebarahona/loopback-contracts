@@ -5,8 +5,8 @@ import {ContractsCodegenError} from './errors';
  * Identifier-casing utilities shared by the engine-internal generators.
  *
  * Centralised so every generator agrees on how `customer.v1` becomes
- * `Customer` / `customer` / `customer-v1` and `lb4 override` stays in sync
- * with `lb4 gen`. Also home to {@link assertNoTraversal}, the defensive
+ * `Customer` / `customer` / `customer-v1` and `lb-contracts override` stays in sync
+ * with `lb-contracts gen`. Also home to {@link assertNoTraversal}, the defensive
  * guard every generator runs against the relative `EmittedFile.path` it
  * builds from schema-derived names.
  *

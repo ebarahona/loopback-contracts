@@ -101,7 +101,7 @@ export class ManifestBackedEmitter implements ProjectionEmitter {
    * For a plural-form manifest there is no canonical single suffix to
    * report, so we derive one from the basename of the first output's path
    * template — the conventional shape ends with `.something.ts`, which is
-   * exactly the slice the registry shows in `lb4 emitters list`.
+   * exactly the slice the registry shows in `lb-contracts emitters list`.
    */
   readonly outputSuffix: string;
   readonly tier: EmitterManifestTier;
@@ -338,7 +338,7 @@ function resolveOutput(
  * form falls back to the basename slice of the first output's path
  * template starting at the first `.` — for `models/{{kebabName}}.dto.ts`
  * that yields `.dto.ts`, which is what users expect to see in the
- * `lb4 emitters list` column.
+ * `lb-contracts emitters list` column.
  */
 function deriveDisplaySuffix(
   manifest: EmitterManifest,

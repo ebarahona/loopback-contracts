@@ -9,7 +9,7 @@ import {EjsTemplateEngine} from '../../engine/template-engine';
  *   `*.base.controller.ts`, `*.base.datasource.ts`) must only import from
  *   sibling base files or external packages — never from extension files.
  *
- * Why: extensions are written `skipIfExists`. On the first `lb4 gen` run
+ * Why: extensions are written `skipIfExists`. On the first `lb-contracts gen` run
  * (and forever, when the user opted out of extensions) they don't exist.
  * Any base-to-extension import would yield an uncompilable project.
  *
@@ -443,7 +443,7 @@ describe('override-routing decorators in generated base files', () => {
   it('repository.base.ts.ejs: relation getter TYPE annotation still references the base class', () => {
     // The type stays on the base — extension extends base, so the getter is
     // structurally compatible at runtime, and the import works on the first
-    // `lb4 gen` run before any extension stub edits.
+    // `lb-contracts gen` run before any extension stub edits.
     const rendered = renderTemplate('repository.base.ts.ejs', REPOSITORY_VIEW);
     expect(rendered).toContain('Getter<OrderBaseRepository>');
   });

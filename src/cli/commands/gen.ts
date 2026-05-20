@@ -114,7 +114,7 @@ async function runOnce(
   opts: {projectRoot: string; config: LoopbackConfigJson},
   flags: ParsedFlags,
 ): Promise<number> {
-  intro('lb4 gen');
+  intro('lb-contracts gen');
   const spin = spinner();
   spin.start(`Running ${PIPELINE_STAGES}-stage pipeline`);
 
@@ -128,7 +128,7 @@ async function runOnce(
     printRunSummary(result, opts.projectRoot);
     outro(
       `Generated ${result.filesWritten.length} files. ` +
-        'Run again with `lb4 gen --watch` for continuous regen.',
+        'Run again with `lb-contracts gen --watch` for continuous regen.',
     );
     return 0;
   } catch (err) {
@@ -228,7 +228,7 @@ async function runWatchMode(
     // throws, `runWatchIteration` already prints the error; we keep the
     // watcher alive so the user can save a fix and trigger a re-run.
     printDivider();
-    console.log(`[${stamp()}] lb4 gen --watch — initial run`);
+    console.log(`[${stamp()}] lb-contracts gen --watch — initial run`);
     void runWatchIteration(pipeline, opts, flags, '<initial>');
   });
 }
@@ -370,7 +370,7 @@ const SIDECAR_EMITTER_KINDS = [
 ] as const;
 
 /**
- * LB4-idiom emitter kinds. Default-ON for every `lb4 gen` because the whole
+ * LB4-idiom emitter kinds. Default-ON for every `lb-contracts gen` because the whole
  * point of running this in a LB4 app is to regenerate the base
  * model/repo/controller/datasource files; users opt OUT per-kind via
  * `--no-emit-<kind>` (or `config.emit.<kind>: false`). The matching
@@ -398,7 +398,7 @@ const BUILTIN_EMITTER_KINDS = [
 ] as const;
 
 /**
- * Every literal flag `lb4 gen` recognises (excluding the dynamic
+ * Every literal flag `lb-contracts gen` recognises (excluding the dynamic
  * `--[no-]emit-<kind>` family which is matched against the live
  * `EmitterRegistry` after the app boots — see {@link runGen}).
  * Maintained by hand so a typo like `--strikt` falls through to the
@@ -417,7 +417,7 @@ const KNOWN_LITERAL_FLAGS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Parsed `lb4 gen` flag set, surfaced through every helper that needs to
+ * Parsed `lb-contracts gen` flag set, surfaced through every helper that needs to
  * inspect a CLI invocation. Exported only so `mergeEmitFlags` (also
  * `@internal`) can be unit-tested without going through the dispatcher;
  * not part of the package's public API.
@@ -685,7 +685,7 @@ function extractKindAfter(arg: string, prefix: string): string | undefined {
  * Merge the three sources that decide which emitters fire for a run.
  *
  * Precedence (lowest to highest):
- *   1. Seed: LB4-idiom kinds default to true (every `lb4 gen` regenerates
+ *   1. Seed: LB4-idiom kinds default to true (every `lb-contracts gen` regenerates
  *      base files for model/repository/controller/datasource unless
  *      explicitly turned off). Sidecar kinds default to false (opt-in).
  *   2. `config.emit` carries `boolean` emitter toggles alongside the

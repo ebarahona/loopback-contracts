@@ -4,7 +4,7 @@ import type {JSONSchema} from './emitter-context.interface';
  * Plugin-contributed mutator that augments one of the project's generated
  * meta-schemas before it is written to `_meta/`.
  *
- * The engine regenerates each meta-schema on every `lb4 gen` from the current
+ * The engine regenerates each meta-schema on every `lb-contracts gen` from the current
  * project state (declared `$id`s, datasource names, registered emitters).
  * Contributors are invoked after the engine's base generation; each
  * contributor receives the current document and returns a new one. The

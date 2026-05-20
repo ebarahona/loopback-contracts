@@ -266,7 +266,7 @@ export interface TemplateEngine {
 }
 
 /**
- * Resolved filesystem layout for the current `lb4 gen` run.
+ * Resolved filesystem layout for the current `lb-contracts gen` run.
  *
  * @public
  */

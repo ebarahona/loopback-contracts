@@ -30,7 +30,7 @@ export interface GeneratorContext {
    * When `true`, generators emit the user-editable extension stub alongside
    * the regenerated base file (`<name>.<kind>.ts` next to
    * `<name>.base.<kind>.ts`). When `false`, only the base file is emitted.
-   * Mirrors the `lb4 override <kind> <name>` opt-in flow.
+   * Mirrors the `lb-contracts override <kind> <name>` opt-in flow.
    */
   includeExtension: boolean;
   /**

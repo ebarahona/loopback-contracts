@@ -35,7 +35,7 @@ const ENV_INTERIOR = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/;
  * lock-step with `findDatasourceEntry()` in `src/cli/commands/override.ts`:
  *
  *   - Keyed map: `{"primary": {"adapter": "mongodb", ...}}` (preferred;
- *     `lb4 ds` writes this form). The optional `$schema` string key is
+ *     `lb-contracts ds` writes this form). The optional `$schema` string key is
  *     allowed; the emitter skips it.
  *   - Legacy array: `[{"name": "primary", "adapter": "mongodb", ...}]`.
  *     Tolerated for fixtures and pre-existing projects that haven't yet
@@ -133,14 +133,14 @@ export class DatasourceGenerator implements ProjectionEmitter {
   }
 
   /**
-   * Back-compat shim used by `lb4 override datasource <name>`, which boots
+   * Back-compat shim used by `lb-contracts override datasource <name>`, which boots
    * a transient application and invokes the generator directly with a
    * caller-supplied entry — bypassing `datasources.json` lookup. New code
    * should reach the generator through the {@link ProjectionEmitter} path
-   * (i.e. `lb4 gen`) instead; this entry point exists only for the
+   * (i.e. `lb-contracts gen`) instead; this entry point exists only for the
    * override command's direct-invocation bootstrap.
    *
-   * @deprecated Use the ProjectionEmitter path (`lb4 gen`) instead; this
+   * @deprecated Use the ProjectionEmitter path (`lb-contracts gen`) instead; this
    *   method is kept for backward compat with the override command's
    *   direct-invocation bootstrap.
    */

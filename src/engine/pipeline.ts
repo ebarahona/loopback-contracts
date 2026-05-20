@@ -154,7 +154,7 @@ type DiffClassification = 'additive' | 'narrowing' | 'breaking' | 'unchanged';
 
 /**
  * Eight-stage validation + codegen pipeline. Owned by the engine; invoked
- * once per `lb4 gen` call.
+ * once per `lb-contracts gen` call.
  *
  * Each stage either passes and hands control to the next or throws a typed
  * error carrying contextual fields. Stage 7d (the actual file write) is the
@@ -1966,7 +1966,7 @@ async function loadDiffStateCache(
  *
  *   - Array form: `[{"name": "primary", "adapter": "mongodb", ...}, ...]`
  *   - Keyed-map form: `{"primary": {"adapter": "mongodb", ...}, ...}` —
- *     preferred shape (`lb4 ds` writes this). The optional `$schema`
+ *     preferred shape (`lb-contracts ds` writes this). The optional `$schema`
  *     key is skipped. Each entry is normalised by folding the map key
  *     in as the entry's `name` field so the returned array shape is
  *     uniform across both layouts.

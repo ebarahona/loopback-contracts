@@ -48,7 +48,8 @@ interface ResolvedFile {
   readonly policy: 'regen' | 'skipIfExists';
 }
 
-const HEADER_BANNER = 'AUTO-GENERATED — do not edit. Regenerate with: lb4 gen';
+const HEADER_BANNER =
+  'AUTO-GENERATED — do not edit. Regenerate with: lb-contracts gen';
 
 /**
  * Atomic, idempotent file writer used by the contracts engine to materialize
@@ -268,7 +269,7 @@ export class FileWriter {
 
   /**
    * Classify each descriptor against on-disk state without writing. Used
-   * by `lb4 gen --dry-run` to preview the diff. Same classification rules
+   * by `lb-contracts gen --dry-run` to preview the diff. Same classification rules
    * as {@link writeAll}.
    *
    * @internal

@@ -29,7 +29,7 @@ export type KnownEmitterKind =
   | 'openapi-components'
   | 'mock-data'
   // LB4-idiom emitters (tier 'lb4-idiom'). Always-on by default — every
-  // `lb4 gen` regenerates the base files. Sidecars opt in; LB4 idiom
+  // `lb-contracts gen` regenerates the base files. Sidecars opt in; LB4 idiom
   // files opt OUT (via `--no-emit-<kind>`) when a user genuinely doesn't
   // want a category (e.g. a contracts-only project that ships no
   // datasources).
@@ -78,7 +78,7 @@ export interface ProjectionEmitter<TPerSchemaOptions = unknown> {
   /** Classification for documentation / prompts / output ordering. */
   readonly tier: 'lb4-idiom' | 'real-translation' | 'convenience';
 
-  /** Shown in `lb4 init` prompts and `lb4 emitters list` output. */
+  /** Shown in `lb-contracts init` prompts and `lb-contracts emitters list` output. */
   readonly description: string;
 
   /** Optional peer-deps declared up front; engine loads them lazily on first emit. */

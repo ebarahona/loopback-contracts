@@ -1,5 +1,5 @@
 // Pure functions that build the project-specific meta-schemas the engine
-// writes to `_meta/` on every `lb4 gen`. The output of every function here
+// writes to `_meta/` on every `lb-contracts gen`. The output of every function here
 // is a plain JSON Schema 2020-12 document — no DI, no I/O, no Ajv. The
 // pipeline (stage 5) handles persistence and validation.
 //
@@ -231,7 +231,7 @@ export function buildDatasourcesMetaSchema(
     oneOf: [
       // Array layout — original shape, kept for back-compat.
       {type: 'array', items: arrayItemSchema},
-      // Keyed-map layout — what `lb4 ds` writes. `$schema` is allowed
+      // Keyed-map layout — what `lb-contracts ds` writes. `$schema` is allowed
       // as a top-level sibling key (typed as string); every other key
       // is a datasource name whose value follows the entry schema.
       {

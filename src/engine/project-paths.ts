@@ -9,7 +9,7 @@ import type {LoopbackConfigJson} from '../types';
  * absolute path against the supplied project root so downstream emitters never
  * have to worry about the current working directory.
  *
- * Config defaults mirror `lb4 init`: `schemasDir` falls back to `./schemas`
+ * Config defaults mirror `lb-contracts init`: `schemasDir` falls back to `./schemas`
  * and `configsDir` falls back to `./configs`.
  *
  * @internal

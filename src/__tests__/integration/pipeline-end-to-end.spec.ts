@@ -331,7 +331,7 @@ describe('Pipeline end-to-end', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Stage-8 compile gate — verifies the production `lb4 gen` codegen path
+// Stage-8 compile gate — verifies the production `lb-contracts gen` codegen path
 // produces TypeScript that compiles against real `@loopback/core`,
 // `@loopback/repository`, and `@loopback/rest` declarations. Drives the
 // engine directly with the four LB4-idiom emit flags enabled, so the test

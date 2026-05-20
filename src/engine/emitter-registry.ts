@@ -11,7 +11,7 @@ import {EMITTER_TAG} from '../keys';
 
 /**
  * Snapshot of a single emitter's metadata — the projection consumed by the
- * CLI's `lb4 init` prompts and the `lb4 emitters list` diagnostic. Carries
+ * CLI's `lb-contracts init` prompts and the `lb-contracts emitters list` diagnostic. Carries
  * only the fields surfaced in user-facing output, not the runtime `emit()`
  * method.
  *
@@ -89,7 +89,7 @@ export class EmitterRegistry {
 
   /**
    * Throw {@link ContractsEmitterConflictError} if two registered emitters
-   * claim the same `kind`. Called once per `lb4 gen` run before the runner
+   * claim the same `kind`. Called once per `lb-contracts gen` run before the runner
    * walks the schema set so collisions surface with one clear message rather
    * than a non-deterministic "last writer wins" silent override.
    *
@@ -113,7 +113,7 @@ export class EmitterRegistry {
 
   /**
    * Project the registry to a plain metadata list — the form consumed by the
-   * `lb4 init` interactive prompt, the `lb4 emitters list` command, and the
+   * `lb-contracts init` interactive prompt, the `lb-contracts emitters list` command, and the
    * meta-schema generator that emits the `emit` enum.
    *
    * @internal

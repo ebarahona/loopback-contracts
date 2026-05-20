@@ -28,7 +28,7 @@ export interface BarrelInput {
    *
    * When omitted, only the base file is re-exported. Engines that don't yet
    * know which extensions exist can pass an always-`false` callback and let
-   * `lb4 override` regenerate the barrel later.
+   * `lb-contracts override` regenerate the barrel later.
    */
   hasExtension?: (
     name: string,

@@ -163,13 +163,13 @@ describe('FileWriter.detectChanges', () => {
     // Seed an existing file we will not modify.
     writeFileSync(
       join(out, 'untouched.ts'),
-      '// AUTO-GENERATED — do not edit. Regenerate with: lb4 gen\nexport const value = 1;\n',
+      '// AUTO-GENERATED — do not edit. Regenerate with: lb-contracts gen\nexport const value = 1;\n',
       'utf8',
     );
     // Seed a file with stale content (header + body).
     writeFileSync(
       join(out, 'stale.ts'),
-      '// AUTO-GENERATED — do not edit. Regenerate with: lb4 gen\nstale\n',
+      '// AUTO-GENERATED — do not edit. Regenerate with: lb-contracts gen\nstale\n',
       'utf8',
     );
     // Seed a file that exists and is targeted with skipIfExists.

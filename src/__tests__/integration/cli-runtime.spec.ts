@@ -13,15 +13,15 @@
 //
 // These tests close that gap:
 //
-//   1. `lb4 override <kind> <contract>` resolves every DI binding the
+//   1. `lb-contracts override <kind> <contract>` resolves every DI binding the
 //      command depends on, for each of the four supported `kind` values.
 //      Catches Critical #1 from the 5th review (wrong `FileWriter` key).
 //
-//   2. `lb4 contract <name>` discovers `SourceExtension`s contributed
+//   2. `lb-contracts contract <name>` discovers `SourceExtension`s contributed
 //      under `SOURCE_EXTENSION_TAG` and invokes the selected one.
 //      Catches Critical #2 from the 5th review (broken `findByTag(filterByTag)`).
 //
-//   3. `lb4 gen` happy path against a seeded fixture — exercises the
+//   3. `lb-contracts gen` happy path against a seeded fixture — exercises the
 //      CONTRACTS_COMPONENT -> runtime bindings -> pipeline invocation
 //      boot order via the shipped `runGen` adapter (not via a hand-wired
 //      bootstrap as in `pipeline-end-to-end.spec.ts`).
@@ -239,13 +239,13 @@ function seedProject(root: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Test case 1 — `lb4 override <kind> <contract>` for every supported kind
+// Test case 1 — `lb-contracts override <kind> <contract>` for every supported kind
 //
 // Each iteration boots a transient `Application`, mounts `ContractsComponent`,
 // resolves `FileWriter` + the requested generator through the DI graph, calls
 // the generator's `generate(schema, config, ctx)` shim, and writes the
 // extension stub to disk. After PR-C the generators became `ProjectionEmitter`
-// contributions and the engine drives them through `emit()` for `lb4 gen`;
+// contributions and the engine drives them through `emit()` for `lb-contracts gen`;
 // `generate()` is retained as a `@deprecated` back-compat method specifically
 // so this override path keeps working without a second bootstrap. A wrong
 // binding key throws `BindingError` at `app.get(...)` — that's the runtime
@@ -253,7 +253,7 @@ function seedProject(root: string): void {
 // regression guard for the `generate()` shim itself.
 // ---------------------------------------------------------------------------
 
-describe('lb4 override — DI binding resolution', () => {
+describe('lb-contracts override — DI binding resolution', () => {
   beforeAll(() => {
     seedProject(OVERRIDE_ROOT);
     // Symlink the plugin's own node_modules so any transitive `@loopback/*`
@@ -304,7 +304,7 @@ describe('lb4 override — DI binding resolution', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test case 2 — `lb4 contract <name>` source-extension discovery
+// Test case 2 — `lb-contracts contract <name>` source-extension discovery
 //
 // Prompts are auto-answered by the `vi.mock('../../cli/prompts', ...)`
 // stack above. The first `select` call inside `pickSource` chooses the
@@ -315,7 +315,7 @@ describe('lb4 override — DI binding resolution', () => {
 // stub's `invoke()` never fired.
 // ---------------------------------------------------------------------------
 
-describe('lb4 contract — SourceExtension discovery', () => {
+describe('lb-contracts contract — SourceExtension discovery', () => {
   beforeAll(() => {
     seedProject(CONTRACT_ROOT);
   });
@@ -346,7 +346,7 @@ describe('lb4 contract — SourceExtension discovery', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test case 3 — `lb4 gen` happy path through the CLI surface
+// Test case 3 — `lb-contracts gen` happy path through the CLI surface
 //
 // `runGen` mounts `ContractsComponent`, binds `PROJECT_PATHS`,
 // `TEMPLATE_ENGINE`, and `IMPORT_MAP` at runtime, aliases the pipeline
@@ -356,7 +356,7 @@ describe('lb4 contract — SourceExtension discovery', () => {
 // boot order Criticals #1/#2 hide behind.
 // ---------------------------------------------------------------------------
 
-describe('lb4 gen — CLI surface boot order', () => {
+describe('lb-contracts gen — CLI surface boot order', () => {
   beforeAll(() => {
     seedProject(GEN_ROOT);
   });

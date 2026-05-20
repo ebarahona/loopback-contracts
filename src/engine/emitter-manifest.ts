@@ -78,7 +78,7 @@ export interface EmitterManifest {
   readonly kind: string;
   /** Tier for prompts/docs/output ordering. */
   readonly tier: EmitterManifestTier;
-  /** Shown in `lb4 init` prompts and `lb4 emitters list` output. */
+  /** Shown in `lb-contracts init` prompts and `lb-contracts emitters list` output. */
   readonly description: string;
   /** Optional peer-deps the template's rendered output expects at runtime. */
   readonly peerDeps?: readonly string[];

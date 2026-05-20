@@ -99,7 +99,7 @@ export namespace ContractsBindings {
 
   /**
    * Binding tag for {@link SourceExtension} contributions consumed by the
-   * `lb4 contract` prompt.
+   * `lb-contracts contract` prompt.
    *
    * @public
    */
@@ -128,7 +128,7 @@ export namespace ContractsBindings {
   export const VALIDATOR_TAG = 'platform.contracts.validator';
 
   /**
-   * Resolved filesystem layout for the current `lb4 gen` run.
+   * Resolved filesystem layout for the current `lb-contracts gen` run.
    *
    * @public
    */

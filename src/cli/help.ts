@@ -24,10 +24,10 @@ function readPackageVersion(): string {
 
 /**
  * Build the full help screen as a single string with a trailing
- * newline. Lists the seven user-facing commands; `lb4 gen` accepts
+ * newline. Lists the seven user-facing commands; `lb-contracts gen` accepts
  * thirteen `--emit-<kind>` flags listed in the EMIT FLAGS tables
  * (nine sidecar kinds + four LB4-idiom kinds), plus the matching
- * `--no-emit-<kind>` overrides documented under `lb4 gen --help`.
+ * `--no-emit-<kind>` overrides documented under `lb-contracts gen --help`.
  * Sidecars default OFF (opt-in); LB4-idiom kinds default ON (opt-out).
  *
  * The emit-flags table is intentionally hard-coded. Querying

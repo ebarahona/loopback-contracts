@@ -46,7 +46,7 @@ const ROOT_NO_CONFIG = join(
 //   2. Config references a typo'd datasource name (e.g. 'primry') when
 //      a real one ('primary') is declared.
 //   3. datasources.json uses the keyed-map layout (the preferred form
-//      `lb4 ds` writes); the loader must populate the meta-schema enum
+//      `lb-contracts ds` writes); the loader must populate the meta-schema enum
 //      from this layout, not just the array form.
 const ROOT_DS_MISSING = join(
   tmpdir(),
@@ -673,7 +673,7 @@ function seedDsKeyedMapFixture(root: string): void {
     JSON.stringify(PERSON_CONFIG, null, 2),
     'utf8',
   );
-  // Keyed-map layout (preferred form `lb4 ds` writes). The loader must
+  // Keyed-map layout (preferred form `lb-contracts ds` writes). The loader must
   // recognise this AND populate the meta-schema enum from it; the array
   // form is already covered by the other fixtures.
   writeFileSync(

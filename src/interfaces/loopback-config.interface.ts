@@ -20,7 +20,7 @@ export type EmitValue = boolean | '.js' | '.ts' | '';
 
 /**
  * Top-level shape of `loopback.config.json` — the per-project entry point
- * the `lb4 init` command writes and `lb4 gen` reads on every run.
+ * the `lb-contracts init` command writes and `lb-contracts gen` reads on every run.
  *
  * Bound under {@link ContractsBindings.CONFIG} — exposed as `@public`
  * because the binding key is `@public` and the generic on the
@@ -29,7 +29,7 @@ export type EmitValue = boolean | '.js' | '.ts' | '';
  * @public
  */
 export interface LoopbackConfigJson {
-  /** Project name (from the `lb4 init` prompt). */
+  /** Project name (from the `lb-contracts init` prompt). */
   readonly name: string;
   /** Directory containing authored `*.schema.json` files. */
   readonly schemasDir: string;

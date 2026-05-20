@@ -35,7 +35,7 @@ export class InMemoryLossyReporter implements LossyReporter {
   /**
    * Reset the buffer between engine runs. Called by the engine pipeline
    * before stage 1 so a long-lived singleton reporter never leaks reports
-   * from a previous `lb4 gen` invocation.
+   * from a previous `lb-contracts gen` invocation.
    */
   clear(): void {
     this.buffer.length = 0;

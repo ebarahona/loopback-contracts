@@ -28,7 +28,7 @@ function fingerprint(schema: JSONSchema): string {
 /**
  * Default {@link SchemaRegistry} implementation — a `Map<string, JSONSchema>`
  * keyed by the schema's `$id`. The engine populates the registry once during
- * stage 1 of `lb4 gen`; emitters receive it via {@link EmitterContext.registry}
+ * stage 1 of `lb-contracts gen`; emitters receive it via {@link EmitterContext.registry}
  * as a read-only view (the mutators below are absent from the interface).
  *
  * Collision policy: re-adding a schema with the same `$id` is allowed only when

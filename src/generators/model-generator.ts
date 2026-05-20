@@ -105,7 +105,7 @@ export class ModelGenerator implements ProjectionEmitter {
       lossy: ctx.lossy,
       // Always emit the extension stub; FileWriter's `skipIfExists` policy
       // means the file is written once on first run and never overwritten,
-      // so every `lb4 gen` is safe to declare it.
+      // so every `lb-contracts gen` is safe to declare it.
       includeExtension: true,
     };
 
@@ -113,15 +113,15 @@ export class ModelGenerator implements ProjectionEmitter {
   }
 
   /**
-   * Back-compat shim used by `lb4 override <kind> <contract>`, which boots
+   * Back-compat shim used by `lb-contracts override <kind> <contract>`, which boots
    * a transient application and invokes the generator directly with a
    * caller-supplied config — bypassing the engine's
    * {@link EmitterContext.configs} registry. New code should reach the
-   * generator through the {@link ProjectionEmitter} path (i.e. `lb4 gen`)
+   * generator through the {@link ProjectionEmitter} path (i.e. `lb-contracts gen`)
    * instead; this entry point exists only for the override command's
    * direct-invocation bootstrap.
    *
-   * @deprecated Use the ProjectionEmitter path (`lb4 gen`) instead; this
+   * @deprecated Use the ProjectionEmitter path (`lb-contracts gen`) instead; this
    *   method is kept for backward compat with the override command's
    *   direct-invocation bootstrap.
    */
