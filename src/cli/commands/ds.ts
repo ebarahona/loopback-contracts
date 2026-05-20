@@ -96,7 +96,7 @@ export async function runDs(opts: {
       const missing = collectMissing(parsed);
       if (missing.length > 0) {
         process.stderr.write(
-          `lb4 ds: missing required ${missing.join(', ')} ` +
+          `lb-contracts ds: missing required ${missing.join(', ')} ` +
             `(non-interactive run; pass --${missing[0]} or run from a TTY).\n`,
         );
         return 1;
@@ -108,7 +108,9 @@ export async function runDs(opts: {
     if (name === '' || adapter === '') {
       // Defensive — should be unreachable after the interactive /
       // non-interactive gates above.
-      process.stderr.write('lb4 ds: internal error: name or adapter empty.\n');
+      process.stderr.write(
+        'lb-contracts ds: internal error: name or adapter empty.\n',
+      );
       return 1;
     }
 
@@ -134,9 +136,9 @@ export async function runDs(opts: {
         '',
         `  ${datasourcesPath}`,
         '',
-        'Next: bind a contract to this datasource via `lb4 contract` ' +
+        'Next: bind a contract to this datasource via `lb-contracts contract <name>` ' +
           'or hand-edit an existing `configs/*.config.json`, ' +
-          'then run `lb4 gen`.',
+          'then run `lb-contracts gen`.',
       ].join('\n'),
       'Datasource added',
     );

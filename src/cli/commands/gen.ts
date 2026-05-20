@@ -11,7 +11,12 @@ import {
   EjsTemplateEngine,
   RelativeImportMap,
 } from '../../engine';
-import type {Pipeline, PipelineResult, PipelineRunOptions} from '../../engine';
+import type {
+  EmitterRegistry,
+  Pipeline,
+  PipelineResult,
+  PipelineRunOptions,
+} from '../../engine';
 import {ContractsEngineBindings} from '../../engine/tokens';
 import {
   getEmitEsm,
@@ -63,12 +68,29 @@ export async function runGen(opts: {
   config: LoopbackConfigJson;
   argv: readonly string[];
 }): Promise<number> {
-  const flags = parseFlags(opts.argv);
-  const isWatch = flags.watch;
+  // Phase 1 — parse literal flags only. `--emit-<kind>` / `--no-emit-<kind>`
+  // tokens are collected verbatim and validated AFTER the app boots so
+  // plugin-contributed emitter kinds (registered via `EMITTER_TAG` through
+  // a manifest or a third-party component) are accepted on the command
+  // line — not just the hard-coded built-ins. README documents
+  // "EMITTER_TAG contributions are auto-accepted by `--emit-<kind>`";
+  // the registry-aware Phase 2 below makes that promise true for the CLI.
+  const preBoot = parseFlagsPreBoot(opts.argv);
+  const isWatch = preBoot.flags.watch;
 
   const app = await bootstrap(opts.projectRoot, opts.config);
 
   try {
+    // Phase 2 — registry-aware validation of deferred `--emit-*` /
+    // `--no-emit-*` tokens. `bootstrap()` already called `app.start()`, so
+    // the `ManifestEmitterBooter` has registered every `*.emitter.json`
+    // under `EMITTER_TAG` and `EmitterRegistry.listMetadata()` returns
+    // the authoritative kind set for this project.
+    const registry = await app.get<EmitterRegistry>(
+      ContractsEngineBindings.EMITTER_REGISTRY,
+    );
+    const flags = await resolveEmitFlagsPostBoot(preBoot, registry);
+
     if (isWatch) {
       return await runWatchMode(app, opts, flags);
     }
@@ -364,18 +386,23 @@ const LB4_IDIOM_EMITTER_KINDS = [
   'datasource',
 ] as const;
 
-/** Every kind the `--emit-*` / `--no-emit-*` flag parser recognises. */
-const EMITTER_KINDS = [
+/**
+ * Built-in fallback kind list used ONLY when the post-boot registry lookup
+ * is unavailable (e.g., a test that drives `mergeEmitFlags` directly
+ * without spinning the app). Real CLI invocations resolve the kind set
+ * through `EmitterRegistry.listMetadata()` so plugin emitters work too.
+ */
+const BUILTIN_EMITTER_KINDS = [
   ...SIDECAR_EMITTER_KINDS,
   ...LB4_IDIOM_EMITTER_KINDS,
 ] as const;
 
 /**
  * Every literal flag `lb4 gen` recognises (excluding the dynamic
- * `--[no-]emit-<kind>` family which is matched separately). Maintained
- * by hand so a typo like `--emit-zog` falls through to the warning path
- * rather than landing silently in an `emitOverrides` slot the engine
- * never reads.
+ * `--[no-]emit-<kind>` family which is matched against the live
+ * `EmitterRegistry` after the app boots — see {@link runGen}).
+ * Maintained by hand so a typo like `--strikt` falls through to the
+ * warning path rather than landing silently in an unread slot.
  */
 const KNOWN_LITERAL_FLAGS: ReadonlySet<string> = new Set([
   '--watch',
@@ -420,7 +447,38 @@ export interface ParsedFlags {
   readonly importExtension: ImportExtension | undefined;
 }
 
-function parseFlags(argv: readonly string[]): ParsedFlags {
+/**
+ * A single deferred `--emit-<kind>` / `--no-emit-<kind>` token captured by
+ * the pre-boot pass. The kind string is matched against the live
+ * `EmitterRegistry` in {@link resolveEmitFlagsPostBoot} so plugin emitters
+ * (registered via `EMITTER_TAG` through a manifest or component) are
+ * accepted alongside the built-ins.
+ */
+interface DeferredEmitToken {
+  /** Verbatim argv token, retained for error messages (e.g. `--emit-foo`). */
+  readonly token: string;
+  /** Kind segment after the prefix (e.g. `'foo'` for `--emit-foo`). */
+  readonly kind: string;
+  /** `true` for `--emit-<kind>`, `false` for `--no-emit-<kind>`. */
+  readonly value: boolean;
+}
+
+/** Result of {@link parseFlagsPreBoot}. */
+interface PreBootFlags {
+  readonly flags: ParsedFlags;
+  readonly deferred: readonly DeferredEmitToken[];
+}
+
+/**
+ * Pre-boot pass: parse every literal flag (`--watch`, `--strict`,
+ * `--allow-breaking`, `--skip-tsc`, `--verbose`, `--esm`, `--no-esm`,
+ * `--import-extension*`, `--emit-graphql-sdl`) and capture every
+ * `--emit-<kind>` / `--no-emit-<kind>` token as a {@link DeferredEmitToken}
+ * for the post-boot, registry-aware pass to resolve. The returned
+ * `flags.emitOverrides` carries only the static `--emit-graphql-sdl`
+ * implication (`graphql: true`); the deferred token list folds in later.
+ */
+function parseFlagsPreBoot(argv: readonly string[]): PreBootFlags {
   let watchMode = false;
   let strict = false;
   let allowBreaking = false;
@@ -430,6 +488,7 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
   let esm: boolean | undefined;
   let importExtension: ImportExtension | undefined;
   const emitOverrides: Record<string, boolean> = {};
+  const deferred: DeferredEmitToken[] = [];
 
   // The dispatcher invokes us with either `gen [...args]` or `dev [...args]`;
   // either form may forward the leading subcommand verbatim. Treat a leading
@@ -468,7 +527,12 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     }
     if (arg === '--emit-graphql-sdl') {
       graphqlSdl = true;
-      // SDL implies the graphql emitter itself is on.
+      // SDL implies the graphql emitter itself is on. This is a literal
+      // (per-schema) flag, not a kind toggle, so we don't defer it — the
+      // implied `graphql` kind override is set here directly. If the
+      // graphql emitter isn't registered for this project, the post-boot
+      // pass will reject the implied override the same way it would
+      // reject an explicit `--emit-graphql`.
       emitOverrides['graphql'] = true;
       continue;
     }
@@ -502,14 +566,20 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
       i++;
       continue;
     }
-    const noEmit = matchEmitFlag(arg, '--no-emit-');
-    if (noEmit !== undefined) {
-      emitOverrides[noEmit] = false;
+    // `--no-emit-<kind>` and `--emit-<kind>` are deferred until the
+    // `EmitterRegistry` is available — the resolved kind set is the
+    // union of built-in TS-class emitters AND any plugin-contributed
+    // emitters registered through `EMITTER_TAG`. Match the longer
+    // prefix (`--no-emit-`) first so `--no-emit-zod` doesn't get parsed
+    // as `--emit-` with kind `'no-emit-zod'`.
+    const noEmitKind = extractKindAfter(arg, '--no-emit-');
+    if (noEmitKind !== undefined) {
+      deferred.push({token: arg, kind: noEmitKind, value: false});
       continue;
     }
-    const emit = matchEmitFlag(arg, '--emit-');
-    if (emit !== undefined) {
-      emitOverrides[emit] = true;
+    const emitKind = extractKindAfter(arg, '--emit-');
+    if (emitKind !== undefined) {
+      deferred.push({token: arg, kind: emitKind, value: true});
       continue;
     }
     // Unknown flag — warn once to stderr but keep going so a single
@@ -517,15 +587,9 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     // (no leading `--`) are silently passed through; the dispatcher
     // already strips the subcommand name above.
     if (arg.startsWith('--') && !KNOWN_LITERAL_FLAGS.has(arg)) {
-      const bare = arg.slice(2);
-      const looksLikeEmit =
-        bare.startsWith('emit-') || bare.startsWith('no-emit-');
-      const hint = looksLikeEmit
-        ? ` Valid emit kinds: ${EMITTER_KINDS.join(', ')}.`
-        : '';
       process.stderr.write(
         `Unknown flag: ${arg}. Run \`lb-contracts --help\` for valid ` +
-          `flags.${hint}\n`,
+          'flags.\n',
       );
       continue;
     }
@@ -534,7 +598,7 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     }
   }
 
-  return {
+  const flags: ParsedFlags = {
     watch: watchMode,
     strict,
     allowBreaking,
@@ -545,6 +609,48 @@ function parseFlags(argv: readonly string[]): ParsedFlags {
     esm,
     importExtension,
   };
+  return {flags, deferred};
+}
+
+/**
+ * Post-boot pass: resolve every deferred `--emit-<kind>` /
+ * `--no-emit-<kind>` token against the live {@link EmitterRegistry}.
+ *
+ * The registry's metadata list is the authoritative set of valid kinds —
+ * it includes built-in TS-class emitters AND any plugin emitter
+ * registered through `EMITTER_TAG` (manifest-backed or otherwise). A
+ * token whose kind isn't in that set throws a `TypeError` rather than
+ * being silently dropped, so a typo (`--emit-zog`) surfaces immediately
+ * instead of masquerading as a no-op.
+ */
+async function resolveEmitFlagsPostBoot(
+  pre: PreBootFlags,
+  registry: EmitterRegistry,
+): Promise<ParsedFlags> {
+  const metadata = await registry.listMetadata();
+  const validKinds = new Set(metadata.map(m => m.kind));
+
+  // Defensive fallback: if no emitters are registered (e.g. a stripped
+  // test harness), accept the built-in kind set so flag parsing still
+  // reports useful errors instead of "valid kinds: <empty>".
+  if (validKinds.size === 0) {
+    for (const k of BUILTIN_EMITTER_KINDS) validKinds.add(k);
+  }
+
+  const merged: Record<string, boolean> = {...pre.flags.emitOverrides};
+  for (const token of pre.deferred) {
+    if (!validKinds.has(token.kind)) {
+      const sorted = Array.from(validKinds).sort();
+      throw new TypeError(
+        `Unknown ${token.token} '${token.kind}' — valid kinds: ` +
+          `${sorted.join(', ')}. Plugin emitters registered via ` +
+          'EMITTER_TAG are accepted automatically.',
+      );
+    }
+    merged[token.kind] = token.value;
+  }
+
+  return {...pre.flags, emitOverrides: merged};
 }
 
 /**
@@ -562,10 +668,17 @@ function validateImportExtension(raw: string): ImportExtension {
   );
 }
 
-function matchEmitFlag(arg: string, prefix: string): string | undefined {
+/**
+ * Strip `prefix` off `arg` and return the remaining kind segment, or
+ * `undefined` if `arg` doesn't start with `prefix` or the kind segment
+ * is empty (`--emit-` with nothing after is a malformed token, not a
+ * deferred entry). The returned string is NOT yet validated against the
+ * registry — that happens in {@link resolveEmitFlagsPostBoot}.
+ */
+function extractKindAfter(arg: string, prefix: string): string | undefined {
   if (!arg.startsWith(prefix)) return undefined;
   const kind = arg.slice(prefix.length);
-  return (EMITTER_KINDS as readonly string[]).includes(kind) ? kind : undefined;
+  return kind.length > 0 ? kind : undefined;
 }
 
 /**

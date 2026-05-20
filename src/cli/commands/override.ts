@@ -32,6 +32,7 @@ import {
   RelativeImportMap,
 } from '../../engine';
 import type {FileWriter} from '../../engine';
+import {ContractsBindings} from '../../keys';
 import type {GeneratorContext} from '../../generators/types';
 import {
   ControllerGenerator,
@@ -140,6 +141,21 @@ export async function runOverride(opts: {
   // future component-level wiring.
   const app = new Application();
   app.component(ContractsComponent);
+
+  // Bind the project root BEFORE `app.start()` so `ManifestEmitterBooter`
+  // (in the `'contracts'` lifecycle group) walks the *caller's* project
+  // tree for `emitters/*.emitter.json` instead of falling back to
+  // `process.cwd()` — which would silently miss project-local manifests
+  // when `lb-contracts override` is invoked from a subdirectory. Mirrors
+  // `gen.ts` / `validate.ts`. `PROJECT_PATHS` is bound for the same
+  // reason: any future lifecycle observer that injects it during start
+  // would otherwise resolve against a cwd-anchored default.
+  const projectPathsForBoot = new DefaultProjectPaths(
+    opts.projectRoot,
+    opts.config,
+  );
+  app.bind(ContractsEngineBindings.PROJECT_ROOT_TAG).to(opts.projectRoot);
+  app.bind(ContractsBindings.PROJECT_PATHS).to(projectPathsForBoot);
 
   try {
     await app.start();

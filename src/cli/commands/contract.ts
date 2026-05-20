@@ -113,8 +113,8 @@ export async function runContract(opts: RunContractOptions): Promise<number> {
   const name = opts.argv[0];
   if (name === undefined || name.trim() === '') {
     process.stderr.write(
-      'lb4 contract: missing required <name> argument.\n' +
-        'Usage: lb4 contract <name>\n',
+      'lb-contracts contract: missing required <name> argument.\n' +
+        'Usage: lb-contracts contract <name>\n',
     );
     return 2;
   }
@@ -130,7 +130,7 @@ export async function runContract(opts: RunContractOptions): Promise<number> {
   if (existsSync(schemaFile) || existsSync(configFile)) {
     process.stderr.write(
       `Contract ${kebabName} already exists. ` +
-        'Run `lb4 override` if you need to extend the generated TS; ' +
+        'Run `lb-contracts override` if you need to extend the generated TS; ' +
         'hand-edit the JSON if you need to revise the model itself.\n',
     );
     return 2;
@@ -201,7 +201,7 @@ export async function runContract(opts: RunContractOptions): Promise<number> {
         `  ${formatRelative(opts.projectRoot, schemaFile)}`,
         `  ${formatRelative(opts.projectRoot, configFile)}`,
         '',
-        'Next: run `lb4 gen` to emit the base TS artefacts.',
+        'Next: run `lb-contracts gen` to emit the base TS artefacts.',
       ].join('\n'),
       'Contract created',
     );
@@ -322,7 +322,10 @@ async function runExtensionSource(
     if (result.configFile !== undefined) {
       lines.push(`  ${result.configFile}`);
     }
-    lines.push('', 'Next: run `lb4 gen` to emit the base TS artefacts.');
+    lines.push(
+      '',
+      'Next: run `lb-contracts gen` to emit the base TS artefacts.',
+    );
     note(lines.join('\n'), 'Contract imported');
     return 0;
   } catch (err) {

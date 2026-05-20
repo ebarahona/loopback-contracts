@@ -245,7 +245,7 @@ export async function runInit(opts: RunInitOptions): Promise<number> {
       return 1;
     }
 
-    outro(`${CONFIG_FILENAME} initialized. Next: lb4 contract <name>`);
+    outro(`${CONFIG_FILENAME} initialized. Next: lb-contracts contract <name>`);
     return 0;
   } catch (err) {
     if (err instanceof ContractsError && err.code === CANCEL_CODE) {
