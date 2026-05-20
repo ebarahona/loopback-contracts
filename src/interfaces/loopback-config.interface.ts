@@ -79,9 +79,9 @@ export interface LoopbackConfigJson {
  * model the flag mitigates.
  *
  * The block is new pre-v1.0 surface — the shape may evolve in a minor
- * before promotion to `@public`. Wave-by-wave the engine will move
- * env-var fallbacks (`LB_CONTRACTS_HTTP_MAX_BYTES`, etc.) over to read
- * these fields directly, deprecating the env-var path.
+ * before promotion to `@public`. Every `security.http.*` field is honored
+ * at runtime by `HttpSchemaSource` with precedence `config \> env \> default`;
+ * env-var overrides use the `LOOPBACK_CONTRACTS_*` namespace.
  *
  * @experimental
  */
@@ -89,43 +89,73 @@ export interface SecurityConfig {
   /**
    * HTTP-source guardrails. Mitigates SSRF, memory exhaustion, and
    * DNS-rebinding attacks against the engine's HTTP/HTTPS schema fetcher.
-   * Partially honored today via env-var fallbacks; the formal plumbing
-   * to `http-source.ts` lands across subsequent waves.
+   * Every field below is honored at runtime by `HttpSchemaSource` with
+   * precedence `config \> LOOPBACK_CONTRACTS_<FIELD> env \> default`.
    */
   readonly http?: {
-    /** Per-request timeout in ms. Default: `30000`. Mitigates slowloris. */
+    /**
+     * Per-request timeout in ms. Mitigates slowloris. Honored at runtime
+     * by `HttpSchemaSource`. Precedence: config \>
+     * `LOOPBACK_CONTRACTS_HTTP_TIMEOUT_MS` env \> default `30000`.
+     */
     readonly timeoutMs?: number;
     /**
-     * Maximum response body size in bytes. Default: `5242880` (5 MB).
-     * Mitigates memory exhaustion from a hostile or runaway remote.
+     * Maximum response body size in bytes. Mitigates memory exhaustion
+     * from a hostile or runaway remote. Honored at runtime by
+     * `HttpSchemaSource`. Precedence: config \>
+     * `LOOPBACK_CONTRACTS_HTTP_MAX_BYTES` env \> default `5242880` (5 MB).
      */
     readonly maxBodyBytes?: number;
     /**
      * Permit fetches whose resolved IP is in private / link-local /
-     * loopback ranges. Default: `false`. Mitigates SSRF against internal
-     * services (metadata endpoints, intranet hosts).
+     * loopback ranges. Mitigates SSRF against internal services
+     * (metadata endpoints, intranet hosts). Honored at runtime by
+     * `HttpSchemaSource`. Precedence: config \>
+     * `LOOPBACK_CONTRACTS_ALLOW_PRIVATE_HOSTS` env \> default `false`.
      */
     readonly allowPrivateHosts?: boolean;
     /**
      * Re-resolve the host and re-check the IP after redirect chains.
-     * Default: `true`. Mitigates DNS rebinding where the first lookup
-     * resolves a public IP and a follow-up resolves an internal one.
+     * Mitigates DNS rebinding where the first lookup resolves a public
+     * IP and a follow-up resolves an internal one. Honored at runtime by
+     * `HttpSchemaSource`. Precedence: config \>
+     * `LOOPBACK_CONTRACTS_VERIFY_RESOLVED_IPS` env \> default `true`.
      */
     readonly verifyResolvedIps?: boolean;
     /**
      * Optional explicit allowlist of hostnames. When set, fetches against
-     * any other host fail loud. Default: unset (no allowlist; any public
-     * host permitted subject to other guards). Mitigates exfil/SSRF by
-     * narrowing the egress surface to known partners.
+     * any other host fail loud. Mitigates exfil/SSRF by narrowing the
+     * egress surface to known partners. Honored at runtime by
+     * `HttpSchemaSource`. Precedence: config \>
+     * `LOOPBACK_CONTRACTS_ALLOWED_HOSTS` env (comma-separated) \> default
+     * unset (no allowlist; any public host permitted subject to other
+     * guards).
      */
     readonly allowedHosts?: readonly string[];
-    /** Follow 3xx redirects. Default: `true`. */
+    /**
+     * Follow 3xx redirects. Honored at runtime by `HttpSchemaSource`.
+     * Precedence: config \> `LOOPBACK_CONTRACTS_ALLOW_REDIRECTS` env \>
+     * default `true`.
+     */
     readonly allowRedirects?: boolean;
     /**
-     * Maximum redirect-chain length. Default: `10`. Mitigates redirect-loop
-     * DoS and limits the number of DNS lookups per fetch.
+     * Maximum redirect-chain length. Mitigates redirect-loop DoS and
+     * limits the number of DNS lookups per fetch. Honored at runtime by
+     * `HttpSchemaSource`. Precedence: config \>
+     * `LOOPBACK_CONTRACTS_MAX_REDIRECTS` env \> default `10`.
      */
     readonly maxRedirects?: number;
+    /**
+     * Permit a redirect chain to downgrade the transport from `https://`
+     * to `http://`. The source only accepts `https://` descriptors
+     * initially, so an attacker controlling a redirect could otherwise
+     * downgrade to plaintext HTTP (MITM-able, no certificate validation,
+     * no encryption). Set to `true` only when integrating with a known
+     * legacy partner — not recommended. Honored at runtime by
+     * `HttpSchemaSource`. Precedence: config \>
+     * `LOOPBACK_CONTRACTS_ALLOW_INSECURE_REDIRECTS` env \> default `false`.
+     */
+    readonly allowInsecureRedirects?: boolean;
   };
   /**
    * Manifest-emitter discovery guardrails — see

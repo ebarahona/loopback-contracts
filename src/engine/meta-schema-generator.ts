@@ -387,6 +387,7 @@ export function buildLoopbackConfigMetaSchema(
               allowedHosts: {type: 'array', items: {type: 'string'}},
               allowRedirects: {type: 'boolean'},
               maxRedirects: {type: 'integer', minimum: 1},
+              allowInsecureRedirects: {type: 'boolean'},
             },
           },
           emitters: {

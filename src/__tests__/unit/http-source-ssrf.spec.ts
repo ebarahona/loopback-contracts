@@ -217,7 +217,11 @@ describe('HttpSchemaSource SSRF hardening', () => {
     it('throws ContractsSourceError when a public host 302s to 169.254.169.254 — second fetch must not fire', async () => {
       const publicOrigin = 'https://attacker.example.com';
       const publicPath = '/contract.json';
-      const privateUrl = 'http://169.254.169.254/latest/meta-data/iam/';
+      // Use an HTTPS metadata URL so the redirect target is rejected by the
+      // private-IP guard, not the HTTPS-to-HTTP downgrade guard. (Many cloud
+      // metadata endpoints listen on plain HTTP; this test pins the
+      // private-IP guard specifically, so we keep the scheme `https://`.)
+      const privateUrl = 'https://169.254.169.254/latest/meta-data/iam/';
       intercept(publicOrigin, publicPath, {
         status: 302,
         body: '',
@@ -240,6 +244,119 @@ describe('HttpSchemaSource SSRF hardening', () => {
       // refused by `assertHostAllowed` before any second fetch was issued.
       expect(mockCalls).toHaveLength(1);
       expect(mockCalls[0]).toBe(`${publicOrigin}${publicPath}`);
+    });
+  });
+
+  /**
+   * Regression guards for the HTTPS-to-HTTP redirect downgrade. The source
+   * only accepts `https://` descriptors initially, so an attacker controlling
+   * a redirect can otherwise downgrade the chain to plaintext HTTP — losing
+   * TLS, cert validation, and integrity. Default-safe behaviour refuses;
+   * `security.http.allowInsecureRedirects=true` opts in.
+   */
+  describe('HTTPS-to-HTTP redirect downgrade (transport integrity)', () => {
+    it('refuses by default when a public https host 302s to http:// (no opt-in)', async () => {
+      const origin = 'https://cdn.example.com';
+      const path = '/widget.json';
+      intercept(origin, path, {
+        status: 302,
+        body: '',
+        headers: {location: 'http://attacker.example.com/widget.json'},
+      });
+      // No interceptor for the http target — if the downgrade guard
+      // regresses, MockAgent will throw a "no match" error, surfacing
+      // the regression as a test failure rather than a silent bypass.
+      const src = new HttpSchemaSource(projectRoot, undefined, mockAgent);
+      const err = await src.fetch(`${origin}${path}`).then(
+        () => {
+          throw new Error('expected fetch to throw');
+        },
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(ContractsSourceError);
+      expect((err as Error).message).toMatch(/downgrades.*HTTP/i);
+      expect((err as Error).message).toMatch(/allowInsecureRedirects/);
+      // Exactly one hop fired — the original https GET. The http target
+      // was refused before the second fetch went out.
+      expect(mockCalls).toHaveLength(1);
+      expect(mockCalls[0]).toBe(`${origin}${path}`);
+    });
+
+    it('proceeds when security.http.allowInsecureRedirects=true is configured', async () => {
+      const origin = 'https://cdn.example.com';
+      const path = '/widget.json';
+      const downstream = 'http://legacy.example.com/widget.json';
+      const payload = '{"$id":"legacy"}';
+      intercept(origin, path, {
+        status: 302,
+        body: '',
+        headers: {location: downstream},
+      });
+      (mockAgent.get('http://legacy.example.com') as Interceptable)
+        .intercept({path: '/widget.json', method: 'GET'})
+        .reply(200, payload, {
+          headers: {
+            'content-type': 'application/json',
+            'content-length': String(Buffer.byteLength(payload)),
+          },
+        })
+        .times(1);
+      const src = new HttpSchemaSource(
+        projectRoot,
+        {
+          name: 't',
+          schemasDir: './schemas',
+          configsDir: './configs',
+          validator: 'ajv',
+          schemas: [],
+          emit: {},
+          security: {http: {allowInsecureRedirects: true}},
+        },
+        mockAgent,
+      );
+      const out = await src.fetch(`${origin}${path}`);
+      expect(out).toHaveLength(1);
+      expect(out[0]?.content).toBe(payload);
+      // Two hops fired — the original https GET and the followed http GET.
+      expect(mockCalls).toHaveLength(2);
+      expect(mockCalls[0]).toBe(`${origin}${path}`);
+      expect(mockCalls[1]).toBe(downstream);
+    });
+
+    it('still refuses exotic schemes (javascript:, data:, file:) even with allowInsecureRedirects=true', async () => {
+      // The opt-in is scoped to the http downgrade only — non-http(s)
+      // schemes remain disallowed regardless of the flag. Pins that the
+      // operator escape hatch does not silently widen to arbitrary schemes.
+      const origin = 'https://cdn.example.com';
+      const path = '/widget.json';
+      intercept(origin, path, {
+        status: 302,
+        body: '',
+        headers: {location: 'file:///etc/passwd'},
+      });
+      const src = new HttpSchemaSource(
+        projectRoot,
+        {
+          name: 't',
+          schemasDir: './schemas',
+          configsDir: './configs',
+          validator: 'ajv',
+          schemas: [],
+          emit: {},
+          security: {http: {allowInsecureRedirects: true}},
+        },
+        mockAgent,
+      );
+      const err = await src.fetch(`${origin}${path}`).then(
+        () => {
+          throw new Error('expected fetch to throw');
+        },
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(ContractsSourceError);
+      expect((err as Error).message).toMatch(/disallowed scheme/);
+      expect((err as Error).message).toMatch(/file:/);
+      expect(mockCalls).toHaveLength(1);
     });
   });
 });

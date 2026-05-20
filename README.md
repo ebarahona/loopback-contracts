@@ -340,7 +340,13 @@ The block is validated against the generated `_meta/loopback-config.schema.json`
 
 ### Per-section behaviour
 
-- **`security.http.*`** — gates the engine's HTTP/HTTPS schema fetcher. Partially honored today via env-var fallbacks (`LOOPBACK_CONTRACTS_HTTP_MAX_BYTES`, `LOOPBACK_CONTRACTS_HTTP_TIMEOUT_MS`, `LOOPBACK_CONTRACTS_ALLOW_PRIVATE_HOSTS`, etc.); the formal config plumbing into `http-source.ts` lands across subsequent waves. The field surface is committed today so consumer configs can opt in now and the env-var path is deprecated cleanly when the wiring lands.
+- **`security.http.*`** — gates the engine's HTTP/HTTPS schema fetcher. Every `security.http.*` field is honored at runtime by `HttpSchemaSource`. Precedence (highest first):
+  1. `loopback.config.json#/security/http/<field>` — explicit per-project
+  2. `LOOPBACK_CONTRACTS_<FIELD>` env var — operator override at the shell
+  3. Built-in default
+
+  Env vars: `LOOPBACK_CONTRACTS_HTTP_TIMEOUT_MS`, `LOOPBACK_CONTRACTS_HTTP_MAX_BYTES`, `LOOPBACK_CONTRACTS_ALLOW_PRIVATE_HOSTS`. Use the config block when possible — it's discoverable + reviewable; env vars are the override-from-CI escape hatch.
+
 - **`security.emitters.allowProjectManifests`** — when `false`, `ManifestEmitterBooter` skips the `<projectRoot>/emitters/*.emitter.json` discovery scan (built-in manifests shipped with the plugin still register). Pin to `false` in CI to keep an attacker who can drop a `*.emitter.json` into the tree from registering a code-execution path through the template engine.
 - **`security.emitters.allowedKinds`** — when set, every discovered manifest whose `kind` is not in the list is dropped at boot (logged under `DEBUG=loopback:contracts:manifest-emitter-booter`). Unset means "every discovered kind registers".
 - **`security.codegen.runTsc`** — when `false`, stage 8 (`tsc --noEmit`) is skipped without needing the CLI `--skip-tsc` flag. Useful when the project already runs `tsc` separately in CI. The CLI `--skip-tsc` flag remains and OR's with this setting.

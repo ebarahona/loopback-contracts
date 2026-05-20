@@ -102,24 +102,52 @@ export class HttpSchemaSource implements SchemaSource {
     const options = this.resolveHttpSecurity();
     assertHostAllowed(uri, this.scheme, options);
     await assertResolvedIpAllowed(uri, this.scheme, options);
-    const dispatcher = this.dispatcherFor(options);
-    if (isSingleFile(uri)) {
-      return this.fetchSingle(uri, options, dispatcher);
+    const {dispatcher, owned} = this.dispatcherFor(options);
+    try {
+      if (isSingleFile(uri)) {
+        return await this.fetchSingle(uri, options, dispatcher);
+      }
+      return await this.fetchDirectory(uri, options, dispatcher);
+    } finally {
+      // Only close the dispatcher when WE created it — when the caller
+      // injected a test-only `dispatcherOverride` (e.g., a `MockAgent`),
+      // the caller owns the lifecycle and closing here would break the
+      // next assertion in the same test file. Long-lived `lb-contracts
+      // gen --watch` processes would otherwise accumulate one connection
+      // pool per fetch since the per-fetch pinned {@link Agent} is never
+      // re-used across calls.
+      if (owned) {
+        try {
+          await dispatcher.close();
+        } catch {
+          // Cleanup is best-effort — a dispatcher that fails to close
+          // cleanly (already closed, mid-shutdown, etc.) must not mask
+          // the success/failure of the fetch itself.
+        }
+      }
     }
-    return this.fetchDirectory(uri, options, dispatcher);
   }
 
   /**
    * Resolve the {@link Dispatcher} that backs every `fetch` issued during
-   * this call. When a test-only `dispatcherOverride` was injected (e.g., a
-   * `MockAgent`), it wins; otherwise a freshly-built DNS-pinning {@link Agent}
-   * is returned so the lookup hook closes the connect-time TOCTOU window
-   * described on {@link assertResolvedIpAllowed}.
+   * this call AND the ownership flag the caller uses to decide whether to
+   * close it. When a test-only `dispatcherOverride` was injected (e.g., a
+   * `MockAgent`), it wins and `owned` is `false` — the test owns the
+   * lifecycle. Otherwise a freshly-built DNS-pinning {@link Agent} is
+   * returned with `owned: true` so the lookup hook closes the connect-time
+   * TOCTOU window described on {@link assertResolvedIpAllowed} AND the
+   * connection pool is released after the call.
    *
    * @internal
    */
-  private dispatcherFor(options: HttpSecurityOptions): Dispatcher {
-    return this.dispatcherOverride ?? buildPinnedDispatcher(options);
+  private dispatcherFor(options: HttpSecurityOptions): {
+    dispatcher: Dispatcher;
+    owned: boolean;
+  } {
+    if (this.dispatcherOverride !== undefined) {
+      return {dispatcher: this.dispatcherOverride, owned: false};
+    }
+    return {dispatcher: buildPinnedDispatcher(options), owned: true};
   }
 
   /**
@@ -146,6 +174,8 @@ export class HttpSchemaSource implements SchemaSource {
       allowedHosts: http?.allowedHosts,
       allowRedirects: http?.allowRedirects ?? true,
       maxRedirects: http?.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
+      allowInsecureRedirects:
+        http?.allowInsecureRedirects ?? allowInsecureRedirectsFromEnv(),
     };
   }
 
@@ -335,6 +365,16 @@ interface HttpSecurityOptions {
   readonly allowedHosts: readonly string[] | undefined;
   readonly allowRedirects: boolean;
   readonly maxRedirects: number;
+  /**
+   * Permit a redirect chain to downgrade the transport from `https://` to
+   * `http://`. Default `false` (safe). When `false`, any redirect target
+   * whose scheme is not exactly `https:` is rejected before the next hop
+   * fires — the source only ever accepts `https://` descriptors initially,
+   * so a redirect to `http://` would silently drop TLS (loss of integrity,
+   * MITM-able, no certificate validation). Opt in only when integrating
+   * with a known legacy partner.
+   */
+  readonly allowInsecureRedirects: boolean;
 }
 
 /** Default per-request timeout in milliseconds, when env var is unset. */
@@ -437,6 +477,21 @@ function maxBodyBytesFromEnv(): number {
  */
 function allowPrivateHostsFromEnv(): boolean {
   const raw = process.env['LOOPBACK_CONTRACTS_ALLOW_PRIVATE_HOSTS'];
+  if (raw === undefined) return false;
+  const v = raw.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+/**
+ * True when `LOOPBACK_CONTRACTS_ALLOW_INSECURE_REDIRECTS` is set to a truthy
+ * value (`1`, `true`, `yes`, `on` — case-insensitive). Any other value — or
+ * an unset variable — keeps the default `false`. Used as the second tier of
+ * {@link resolveHttpSecurity}'s precedence ladder for the redirect-downgrade
+ * gate. Opting in lets a redirect chain step down from `https://` to
+ * `http://`, losing TLS — only do so for trusted legacy partners.
+ */
+function allowInsecureRedirectsFromEnv(): boolean {
+  const raw = process.env['LOOPBACK_CONTRACTS_ALLOW_INSECURE_REDIRECTS'];
   if (raw === undefined) return false;
   const v = raw.trim().toLowerCase();
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
@@ -975,12 +1030,30 @@ async function followRedirects(
         {cause},
       );
     }
-    if (nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') {
-      throw new ContractsSourceError(
-        `HTTP redirect from '${currentUrl}' targets disallowed scheme ` +
-          `'${nextUrl.protocol}' — only http:/https: are followed`,
-        {scheme, uri: currentUrl},
-      );
+    if (nextUrl.protocol !== 'https:') {
+      // A non-https target is either an unsupported scheme entirely
+      // (`javascript:`, `data:`, `file:`, etc.) OR — the load-bearing case
+      // — `http:`, which silently strips TLS off a chain that started at
+      // `https://`. The opt-in is scoped to the http downgrade only;
+      // exotic schemes are always refused regardless of the flag.
+      if (nextUrl.protocol === 'http:' && options.allowInsecureRedirects) {
+        // Operator explicitly accepted the downgrade — fall through to
+        // the host/IP checks below and let the next hop fire.
+      } else if (nextUrl.protocol === 'http:') {
+        throw new ContractsSourceError(
+          `HTTP redirect from '${currentUrl}' to '${nextUrl.toString()}' ` +
+            'downgrades the transport to HTTP — refusing for transport ' +
+            'integrity. Configure security.http.allowInsecureRedirects=true ' +
+            'to opt in (NOT recommended).',
+          {scheme, uri: currentUrl},
+        );
+      } else {
+        throw new ContractsSourceError(
+          `HTTP redirect from '${currentUrl}' targets disallowed scheme ` +
+            `'${nextUrl.protocol}' — only https: is followed`,
+          {scheme, uri: currentUrl},
+        );
+      }
     }
     assertHostAllowed(nextUrl.toString(), scheme, options);
     await assertResolvedIpAllowed(nextUrl.toString(), scheme, options);
