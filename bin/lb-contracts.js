@@ -23,7 +23,19 @@ if (!existsSync(distEntry)) {
 
 try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  require(distEntry);
+  const cli = require(distEntry);
+  // The compiled module exports `runCli(argv)` which awaits the
+  // dispatcher and calls `process.exit` with the resolved exit code.
+  // Calling it explicitly avoids relying on `require.main === module`
+  // — that condition is FALSE when this shim is the process entry and
+  // the dispatcher is loaded via `require()`, so the dispatcher's own
+  // auto-exit branch never fires from this path.
+  if (typeof cli.runCli !== 'function') {
+    throw new Error(
+      'compiled CLI is missing the `runCli` export (rebuild may be stale)',
+    );
+  }
+  cli.runCli(process.argv.slice(2));
 } catch (err) {
   const message = err && err.message ? err.message : String(err);
   process.stderr.write('lb-contracts: failed to load CLI (' + message + ')\n');

@@ -15,17 +15,20 @@
 // rendered grouped by source path. Other thrown errors propagate to the
 // dispatcher's `renderError()` handler.
 
-import {Application} from '@loopback/core';
-import {relative} from 'node:path';
+import {Application, BindingScope} from '@loopback/core';
+import {join, relative} from 'node:path';
 import {createCliContext} from '../cli-context';
 import {ContractsComponent} from '../../contracts.component';
 import type {Pipeline} from '../../engine';
 import {
   ContractsEngineBindings,
   DefaultProjectPaths,
+  EjsTemplateEngine,
   InMemoryLossyReporter,
   InMemorySchemaRegistry,
+  RelativeImportMap,
 } from '../../engine';
+import type {ImportMap, SchemaRegistry} from '../../interfaces';
 import {ContractsValidationError} from '../../helpers';
 import {ContractsBindings} from '../../keys';
 import type {LoopbackConfigJson} from '../../types';
@@ -81,8 +84,10 @@ export async function runValidate(opts: RunValidateOptions): Promise<number> {
   // runtime-valued instances (`PROJECT_PATHS`, the in-memory reporter and
   // schema-registry instances we own) cannot be shadowed by a later
   // component-side `.toClass()`. The component intentionally omits
-  // `TEMPLATE_ENGINE` and `IMPORT_MAP`; this command never reaches the
-  // emitter-runner (validateOnly = true), so neither key is required.
+  // `TEMPLATE_ENGINE` and `IMPORT_MAP` because their backing classes
+  // need constructor args the container cannot provide; we bind both
+  // below so the eager Pipeline -> EmitterRunner DI graph resolves
+  // even on the validate-only path that never actually runs codegen.
   app.component(ContractsComponent);
 
   const paths = new DefaultProjectPaths(opts.projectRoot, opts.config);
@@ -94,6 +99,31 @@ export async function runValidate(opts: RunValidateOptions): Promise<number> {
   app.bind(ContractsBindings.SCHEMA_REGISTRY).to(schemaRegistry);
   app.bind(ContractsBindings.LOSSY_REPORTER).to(reporter);
   app.bind(ContractsEngineBindings.PROJECT_ROOT_TAG).to(opts.projectRoot);
+
+  // TEMPLATE_ENGINE + IMPORT_MAP MUST be bound even on the validate
+  // path. The Pipeline class injects EmitterRunner, which injects both
+  // non-optionally; the DI container resolves the full graph eagerly,
+  // so `app.get(PIPELINE)` would throw "key X is not bound" the moment
+  // we try to resolve it — even though validateOnly never actually
+  // invokes a template render. Bind the same lazy `toDynamicValue`
+  // factories `gen` uses; idle until codegen runs (which it won't,
+  // under validateOnly).
+  app
+    .bind(ContractsBindings.TEMPLATE_ENGINE)
+    .toDynamicValue(() => new EjsTemplateEngine(paths.outputDir))
+    .inScope(BindingScope.SINGLETON);
+  app
+    .bind(ContractsBindings.IMPORT_MAP)
+    .toDynamicValue(resolutionCtx => {
+      const registry = resolutionCtx.context.getSync<SchemaRegistry>(
+        ContractsBindings.SCHEMA_REGISTRY,
+      );
+      const map: ImportMap = new RelativeImportMap(registry, schemaId =>
+        join(paths.outputDir, 'models', `${schemaId}.base.model.ts`),
+      );
+      return map;
+    })
+    .inScope(BindingScope.SINGLETON);
 
   let exitCode = 0;
   try {

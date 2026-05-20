@@ -142,9 +142,34 @@ export async function main(argv: readonly string[]): Promise<number> {
 }
 
 /**
+ * Public entry called by the `bin/lb-contracts.js` shim. Exported as
+ * `@internal` because no consumer of the published package should be
+ * invoking the CLI programmatically — that's what the `bin` is for —
+ * but the explicit call from the bin shim is the canonical activation
+ * path and must be importable.
+ *
+ * @internal
+ */
+export async function runCli(argv: readonly string[]): Promise<void> {
+  let code: number;
+  try {
+    code = await main([...argv]);
+  } catch (err) {
+    // Last-resort: an error escaped `main` itself (should be
+    // impossible — `main` catches everything).
+    process.stderr.write(renderError(err));
+    code = 1;
+  }
+  process.exit(code);
+}
+
+/**
  * Detect whether this module was loaded as the process entry point
- * (i.e., via the `bin` shim). Importing the module for tests must NOT
- * trigger the auto-exit path.
+ * (i.e., `node dist/cli/index.js` invoked directly). Importing the
+ * module for tests must NOT trigger the auto-exit path, and the bin
+ * shim's `require(distEntry)` path also short-circuits this branch
+ * because `require.main` is the bin shim, not this module — the bin
+ * calls `runCli()` explicitly to bridge that gap.
  *
  * @internal
  */
@@ -157,15 +182,5 @@ function isCliEntry(): boolean {
 }
 
 if (isCliEntry()) {
-  main(process.argv.slice(2)).then(
-    code => {
-      process.exit(code);
-    },
-    err => {
-      // Last-resort: an error escaped `main` itself (should be
-      // impossible — `main` catches everything).
-      process.stderr.write(renderError(err));
-      process.exit(1);
-    },
-  );
+  void runCli(process.argv.slice(2));
 }
