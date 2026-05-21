@@ -1,0 +1,940 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="./"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>@ebarahona/loopback-contracts - v0.1.0</title><meta name="description" content="Documentation for @ebarahona/loopback-contracts"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="assets/style.css"/><link rel="stylesheet" href="assets/highlight.css"/><script defer src="assets/main.js"></script><script async src="assets/icons.js" id="tsd-icons-script"></script><script async src="assets/search.js" id="tsd-search-script"></script><script async src="assets/navigation.js" id="tsd-nav-script"></script><script async src="assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar"><div class="tsd-toolbar-contents container"><a href="index.html" class="title">@ebarahona/loopback-contracts - v0.1.0</a><div id="tsd-toolbar-links"><a href="https://github.com/ebarahona/loopback-contracts">GitHub</a><a href="https://github.com/ebarahona/loopback-contracts/blob/main/STYLE_GUIDE.md">Style Guide</a></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/><ul role="listbox" id="tsd-search-results"></ul><div id="tsd-search-status" aria-live="polite" aria-atomic="true"><div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-menu"></use></svg></a></div></header><div class="container container-main"><div class="col-content"><div class="tsd-page-title"><h1>@ebarahona/loopback-contracts - v0.1.0</h1></div><div class="tsd-panel tsd-typography"><h1 id="ebarahonaloopback-contracts" class="tsd-anchor-link">@ebarahona/loopback-contracts<a href="#ebarahonaloopback-contracts" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p>Contract (JSON Schema-first) code generation and projection architecture for LoopBack 4.</p>
+<p><code>@ebarahona/loopback-contracts</code> turns JSON Schema contracts into OpenAPI 3.1 specifications, then projects those specifications into LoopBack 4 runtime artifacts such as models, repositories, controllers, datasources, and optional ecosystem sidecars.</p>
+<p>Optional sidecar emitters can also generate:</p>
+<ul>
+<li>Zod validators</li>
+<li>TypeScript types</li>
+<li>GraphQL</li>
+<li>AsyncAPI</li>
+<li>Protocol Buffers</li>
+<li>Avro</li>
+<li>CloudEvents</li>
+<li>OpenAPI component fragments</li>
+<li>mock fixtures</li>
+</ul>
+<p>It is built for teams that want the speed of contract-driven scaffolding without giving up LoopBack 4's dynamic dependency injection, extension points, and composable runtime architecture.</p>
+<hr>
+<h1 id="quickstart" class="tsd-anchor-link">Quickstart<a href="#quickstart" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p>Two ways to start.</p>
+<h2 id="1-define-a-model-via-cli" class="tsd-anchor-link">1. Define a model via CLI<a href="#1-define-a-model-via-cli" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Install:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">install</span><span class="hl-1"> </span><span class="hl-2">@ebarahona/loopback-contracts</span><span class="hl-1"> </span><span class="hl-2">@loopback/core</span><span class="hl-1"> </span><span class="hl-2">@loopback/repository</span><span class="hl-1"> </span><span class="hl-2">@loopback/rest</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Scaffold and generate:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">init</span><span class="hl-1">                          </span><span class="hl-3"># writes loopback.config.json</span><br/><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">ds</span><span class="hl-1"> </span><span class="hl-2">primary</span><span class="hl-1"> </span><span class="hl-4">--adapter</span><span class="hl-1"> </span><span class="hl-2">memory</span><span class="hl-1">   </span><span class="hl-3"># declares a datasource</span><br/><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">contract</span><span class="hl-1"> </span><span class="hl-2">order</span><span class="hl-1">                </span><span class="hl-3"># interactive wizard</span><br/><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">gen</span><span class="hl-1">                           </span><span class="hl-3"># JSON Schema -&gt; OpenAPI 3.1 -&gt; LB4 files</span>
+</code><button type="button">Copy</button></pre>
+
+<p>The wizard authors <code>schemas/order.schema.json</code> and <code>configs/order.config.json</code> for you.</p>
+<h2 id="2-use-a-local-json-schema" class="tsd-anchor-link">2. Use a local JSON Schema<a href="#2-use-a-local-json-schema" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Skip the wizard. Drop a hand-authored schema in <code>schemas/</code>:</p>
+<pre><code class="json"><span class="hl-3">// schemas/order.schema.json</span><br/><span class="hl-1">{</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;$schema&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;https://json-schema.org/draft/2020-12/schema&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;$id&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;order&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;type&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;object&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;required&quot;</span><span class="hl-1">: [</span><span class="hl-2">&quot;id&quot;</span><span class="hl-1">, </span><span class="hl-2">&quot;total&quot;</span><span class="hl-1">],</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;properties&quot;</span><span class="hl-1">: {</span><br/><span class="hl-1">    </span><span class="hl-5">&quot;id&quot;</span><span class="hl-1">: {</span><span class="hl-5">&quot;type&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;string&quot;</span><span class="hl-1">},</span><br/><span class="hl-1">    </span><span class="hl-5">&quot;total&quot;</span><span class="hl-1">: {</span><span class="hl-5">&quot;type&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;number&quot;</span><span class="hl-1">, </span><span class="hl-5">&quot;minimum&quot;</span><span class="hl-1">: </span><span class="hl-6">0</span><span class="hl-1">}</span><br/><span class="hl-1">  }</span><br/><span class="hl-1">}</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Add the matching LoopBack binding in <code>configs/</code>:</p>
+<pre><code class="json"><span class="hl-3">// configs/order.config.json</span><br/><span class="hl-1">{</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;$contractId&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;order&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;dataSource&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;primary&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;public&quot;</span><span class="hl-1">: </span><span class="hl-4">true</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;model&quot;</span><span class="hl-1">: {</span><span class="hl-5">&quot;base&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;Entity&quot;</span><span class="hl-1">, </span><span class="hl-5">&quot;strict&quot;</span><span class="hl-1">: </span><span class="hl-4">true</span><span class="hl-1">, </span><span class="hl-5">&quot;idProperty&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;id&quot;</span><span class="hl-1">}</span><br/><span class="hl-1">}</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Then run:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">gen</span>
+</code><button type="button">Copy</button></pre>
+
+<p>The engine picks up every <code>schemas/*.schema.json</code> file and its matching <code>configs/*.config.json</code> on every run.</p>
+<h2 id="output-both-paths" class="tsd-anchor-link">Output (both paths)<a href="#output-both-paths" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="txt">src/
+  models/
+    order.base.model.ts            # generated, regenerated on every `lb-contracts gen`
+    order.model.ts                 # editable, scaffolded by `lb-contracts override model order`
+  repositories/
+    order.base.repository.ts       # generated
+    order.repository.ts            # editable, scaffolded by `lb-contracts override repository order`
+  controllers/
+    order.base.controller.ts       # generated
+    order.controller.ts            # editable, scaffolded by `lb-contracts override controller order`
+  datasources/
+    primary.base.datasource.ts     # generated
+    primary.datasource.ts          # editable, scaffolded by `lb-contracts override datasource primary`
+</code><button type="button">Copy</button></pre>
+
+<p>The <code>.base.*</code> files are runnable as-is. The companions (no <code>.base.</code> infix) are user-owned: scaffolded once by <code>lb-contracts override</code>, owned by you forever, never overwritten by <code>gen</code>. Custom finders, route overrides, lifecycle hooks, and interceptors live there. See <a href="#overrides">Overrides</a>.</p>
+<hr>
+<h1 id="mental-model" class="tsd-anchor-link">Mental model<a href="#mental-model" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<pre><code class="mermaid">graph LR
+
+  A[JSON Schema 2020-12]
+    --> B[OpenAPI 3.1 Projection]
+
+  B --> C[LoopBack Models]
+  B --> D[Repositories]
+  B --> E[Controllers]
+  B --> F[Datasources]
+
+  B --> G[Zod]
+  B --> H[TypeScript Types]
+  B --> I[GraphQL]
+  B --> J[AsyncAPI]
+  B --> K[CloudEvents]
+  B --> L[Proto / Avro]
+  B --> M[Mock Fixtures]
+</code><button type="button">Copy</button></pre>
+
+<p>The contract is the source of truth. Everything else is a projection.</p>
+<hr>
+<details>
+<summary><strong>Why this exists</strong></summary>
+<p>Most backend teams end up describing the same shape multiple times:</p>
+<ul>
+<li>JSON Schema</li>
+<li>OpenAPI schemas</li>
+<li>LoopBack models</li>
+<li>repositories</li>
+<li>controllers</li>
+<li>validators</li>
+<li>generated types</li>
+<li>SDKs</li>
+<li>event payloads</li>
+<li>mock fixtures</li>
+</ul>
+<p>Over time, those definitions drift.</p>
+<p><code>@ebarahona/loopback-contracts</code> makes JSON Schema the source of truth.</p>
+<p>Define the contract once.
+Generate the rest.</p>
+</details>
+<details>
+<summary><strong>What this project is</strong></summary>
+<p><code>@ebarahona/loopback-contracts</code> is:</p>
+<ul>
+<li>a JSON Schema-first code generation system</li>
+<li>a projection pipeline</li>
+<li>a LoopBack-oriented generator architecture</li>
+<li>an extensible emitter framework</li>
+<li>a contract-first backend workflow</li>
+</ul>
+</details>
+<details>
+<summary><strong>What this project is NOT</strong></summary>
+<p><code>@ebarahona/loopback-contracts</code> is NOT:</p>
+<ul>
+<li>a runtime transport framework</li>
+<li>a Kafka framework</li>
+<li>a Redis Streams framework</li>
+<li>a queue system</li>
+<li>a workflow engine</li>
+<li>a NestJS replacement</li>
+</ul>
+<p>Some generated sidecars such as AsyncAPI or CloudEvents can describe message contracts, but this package does not provide the runtime infrastructure that sends, receives, retries, persists, or orchestrates messages.</p>
+</details>
+<details>
+<summary><strong>Who this is for</strong></summary>
+<ul>
+<li>Existing LoopBack 4 teams who want less boilerplate while preserving LB4's dependency injection, repositories, extension points, and OpenAPI-first architecture</li>
+<li>LoopBack 3 developers who miss rapid model-first API development and want a modern TypeScript migration path without giving up productivity</li>
+<li>NestJS developers interested in stronger contract-first workflows, runtime composition, and LoopBack 4's dynamic dependency injection and extension system</li>
+<li>Platform and infrastructure teams using a single contract to generate and synchronize APIs, backend services, mobile clients, validators, schemas, edge runtimes (Lambda, Cloud Run, Workers), and reusable architecture across an entire platform</li>
+</ul>
+<p>LoopBack 4 was designed differently from most Node.js frameworks.</p>
+<p>Instead of focusing primarily on decorators and application structure, LoopBack 4 uses a highly composable backend architecture built around:</p>
+<ul>
+<li>runtime dependency injection</li>
+<li>extension points</li>
+<li>dynamic discovery</li>
+<li>repository patterns</li>
+<li>datasource abstraction</li>
+<li>OpenAPI-first APIs</li>
+<li>transport-agnostic composition</li>
+<li>pluggable framework primitives</li>
+</ul>
+<p>These capabilities make LoopBack 4 especially powerful for:</p>
+<ul>
+<li>platform engineering</li>
+<li>reusable backend systems</li>
+<li>multi-service architectures</li>
+<li>framework extensions</li>
+<li>large-scale enterprise applications</li>
+</ul>
+<p>But many teams still spend significant time manually wiring repetitive framework artifacts.</p>
+<p><code>@ebarahona/loopback-contracts</code> preserves the architectural strengths and runtime flexibility of LoopBack 4 while dramatically reducing boilerplate through contract-first generation.</p>
+<p>Instead of manually maintaining:</p>
+<ul>
+<li>models</li>
+<li>repositories</li>
+<li>controllers</li>
+<li>validators</li>
+<li>generated types</li>
+<li>OpenAPI synchronization</li>
+</ul>
+<p>Define the contract once and project the framework artifacts automatically.</p>
+<h3 id="former-loopback-3-users" class="tsd-anchor-link">Former LoopBack 3 users<a href="#former-loopback-3-users" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>LoopBack 3 was fast.</p>
+<p>Many developers still miss:</p>
+<ul>
+<li>rapid CRUD scaffolding</li>
+<li>model-first workflows
+<ul>
+<li>model.json</li>
+<li>model.config.json</li>
+</ul>
+</li>
+<li>convention-driven APIs</li>
+<li>low-friction development</li>
+</ul>
+<p><code>@ebarahona/loopback-contracts</code> aims to recover some of that productivity while preserving the architectural strengths of LoopBack 4:</p>
+<ul>
+<li>TypeScript-first</li>
+<li>Dependency Injection</li>
+<li>OpenAPI-first APIs</li>
+<li>extension points</li>
+<li>composable runtime architecture</li>
+</ul>
+<h3 id="nestjs-users" class="tsd-anchor-link">NestJS users<a href="#nestjs-users" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>NestJS provides strong developer ergonomics and a familiar application structure.</p>
+<p>But as systems grow, many NestJS applications become heavily centered around statically wired modules, decorators, DTOs, validators, and generated types that must be manually synchronized across services and platforms.</p>
+<p>LoopBack 4 was designed differently.</p>
+<p>Its runtime architecture is built around:</p>
+<ul>
+<li>dynamic dependency injection</li>
+<li>extension points</li>
+<li>runtime discovery</li>
+<li>pluggable framework primitives</li>
+<li>transport-agnostic composition</li>
+</ul>
+<p>This makes LoopBack 4 especially powerful for:</p>
+<ul>
+<li>platform engineering</li>
+<li>reusable backend systems</li>
+<li>internal frameworks</li>
+<li>multi-service architectures</li>
+<li>contract-driven platforms</li>
+</ul>
+<p><code>@ebarahona/loopback-contracts</code> combines that runtime flexibility with a contract-first workflow.</p>
+<p>Define the contract once and project:</p>
+<ul>
+<li>OpenAPI specifications</li>
+<li>models</li>
+<li>repositories</li>
+<li>controllers</li>
+<li>validators</li>
+<li>generated types</li>
+<li>mobile/client contracts</li>
+<li>edge runtime artifacts</li>
+</ul>
+<p>The contract becomes the source of truth for the entire platform.</p>
+</details>
+<details>
+<summary><strong>Features</strong></summary>
+<p>Core LoopBack outputs:</p>
+<ul>
+<li>LoopBack 4 models</li>
+<li>repositories</li>
+<li>controllers</li>
+<li>datasources</li>
+<li>OpenAPI 3.1 output</li>
+<li>generated barrels</li>
+<li>project meta-schemas</li>
+</ul>
+<p>Optional sidecar outputs:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Output</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--emit-zod</code></td>
+<td>Zod validators</td>
+</tr>
+<tr>
+<td><code>--emit-types</code></td>
+<td>TypeScript interfaces</td>
+</tr>
+<tr>
+<td><code>--emit-graphql</code></td>
+<td>GraphQL code-first decorators</td>
+</tr>
+<tr>
+<td><code>--emit-graphql-sdl</code></td>
+<td>GraphQL SDL</td>
+</tr>
+<tr>
+<td><code>--emit-cloudevents</code></td>
+<td>typed CloudEvents wrappers</td>
+</tr>
+<tr>
+<td><code>--emit-asyncapi</code></td>
+<td>AsyncAPI fragments</td>
+</tr>
+<tr>
+<td><code>--emit-proto</code></td>
+<td>Protocol Buffers schema</td>
+</tr>
+<tr>
+<td><code>--emit-avro</code></td>
+<td>Avro schema</td>
+</tr>
+<tr>
+<td><code>--emit-openapi-components</code></td>
+<td>OpenAPI components fragment</td>
+</tr>
+<tr>
+<td><code>--emit-mock-data</code></td>
+<td>mock JSON fixtures</td>
+</tr>
+</tbody>
+</table>
+</details>
+<hr>
+<h1 id="installation" class="tsd-anchor-link">Installation<a href="#installation" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">install</span><span class="hl-1"> </span><span class="hl-2">@ebarahona/loopback-contracts</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Install LoopBack peer dependencies:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">install</span><span class="hl-1"> </span><span class="hl-2">@loopback/core</span><span class="hl-1"> </span><span class="hl-2">@loopback/repository</span><span class="hl-1"> </span><span class="hl-2">@loopback/rest</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Node.js requirement:</p>
+<pre><code class="txt">Node.js &gt;= 20.19.0
+</code><button type="button">Copy</button></pre>
+
+<details>
+<summary><strong>Optional sidecar dependencies</strong></summary>
+<p>Sidecars are loaded lazily. Install only what we emit.</p>
+<table>
+<thead>
+<tr>
+<th>Sidecar</th>
+<th>Install</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Zod validators</td>
+<td><code>npm install zod json-schema-to-zod</code></td>
+</tr>
+<tr>
+<td>TypeScript types</td>
+<td><code>npm install json-schema-to-typescript</code></td>
+</tr>
+<tr>
+<td>GraphQL</td>
+<td><code>npm install quicktype-core</code></td>
+</tr>
+<tr>
+<td>Protocol Buffers</td>
+<td><code>npm install quicktype-core</code></td>
+</tr>
+<tr>
+<td>Avro</td>
+<td><code>npm install quicktype-core</code></td>
+</tr>
+<tr>
+<td>CloudEvents</td>
+<td><code>npm install cloudevents</code></td>
+</tr>
+<tr>
+<td>Mock data</td>
+<td><code>npm install json-schema-faker</code></td>
+</tr>
+</tbody>
+</table>
+<p>If an emit flag is enabled without the required package installed, generation fails fast with the missing package name and install command.</p>
+</details>
+<details>
+<summary><strong>CLI examples</strong></summary>
+<p>Initialize the project:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">init</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Add a datasource:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">ds</span><span class="hl-1"> </span><span class="hl-2">primary</span><span class="hl-1"> </span><span class="hl-4">--adapter</span><span class="hl-1"> </span><span class="hl-2">memory</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Create a contract:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">contract</span><span class="hl-1"> </span><span class="hl-2">order</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Generate artifacts:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">gen</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Generate with sidecars:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">gen</span><span class="hl-1"> </span><span class="hl-4">--emit-zod</span><span class="hl-1"> </span><span class="hl-4">--emit-types</span><span class="hl-1"> </span><span class="hl-4">--emit-openapi-components</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Run in watch mode:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">gen</span><span class="hl-1"> </span><span class="hl-4">--watch</span>
+</code><button type="button">Copy</button></pre>
+
+<p>or:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">dev</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Validate without writing generated output:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">validate</span>
+</code><button type="button">Copy</button></pre>
+
+</details>
+<details>
+<summary><strong>Example workflow (with full schema)</strong></summary>
+<p>Create a contract:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">contract</span><span class="hl-1"> </span><span class="hl-2">order</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Generated files:</p>
+<pre><code class="txt">schemas/order.schema.json
+configs/order.config.json
+</code><button type="button">Copy</button></pre>
+
+<p>Example schema:</p>
+<pre><code class="json"><span class="hl-1">{</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;$schema&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;https://json-schema.org/draft/2020-12/schema&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;$id&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;order&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;title&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;Order&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;type&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;object&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;required&quot;</span><span class="hl-1">: [</span><span class="hl-2">&quot;id&quot;</span><span class="hl-1">, </span><span class="hl-2">&quot;status&quot;</span><span class="hl-1">, </span><span class="hl-2">&quot;total&quot;</span><span class="hl-1">],</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;properties&quot;</span><span class="hl-1">: {</span><br/><span class="hl-1">    </span><span class="hl-5">&quot;id&quot;</span><span class="hl-1">: {</span><br/><span class="hl-1">      </span><span class="hl-5">&quot;type&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;string&quot;</span><br/><span class="hl-1">    },</span><br/><span class="hl-1">    </span><span class="hl-5">&quot;status&quot;</span><span class="hl-1">: {</span><br/><span class="hl-1">      </span><span class="hl-5">&quot;type&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;string&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">      </span><span class="hl-5">&quot;enum&quot;</span><span class="hl-1">: [</span><span class="hl-2">&quot;pending&quot;</span><span class="hl-1">, </span><span class="hl-2">&quot;paid&quot;</span><span class="hl-1">, </span><span class="hl-2">&quot;cancelled&quot;</span><span class="hl-1">]</span><br/><span class="hl-1">    },</span><br/><span class="hl-1">    </span><span class="hl-5">&quot;total&quot;</span><span class="hl-1">: {</span><br/><span class="hl-1">      </span><span class="hl-5">&quot;type&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;number&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">      </span><span class="hl-5">&quot;minimum&quot;</span><span class="hl-1">: </span><span class="hl-6">0</span><br/><span class="hl-1">    },</span><br/><span class="hl-1">    </span><span class="hl-5">&quot;createdAt&quot;</span><span class="hl-1">: {</span><br/><span class="hl-1">      </span><span class="hl-5">&quot;type&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;string&quot;</span><span class="hl-1">,</span><br/><span class="hl-1">      </span><span class="hl-5">&quot;format&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;date-time&quot;</span><br/><span class="hl-1">    }</span><br/><span class="hl-1">  }</span><br/><span class="hl-1">}</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Generate:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">gen</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Generated output:</p>
+<pre><code class="txt">src/
+  models/
+    order.base.model.ts
+    index.ts
+
+  repositories/
+    order.base.repository.ts
+    index.ts
+
+  controllers/
+    order.base.controller.ts
+    index.ts
+</code><button type="button">Copy</button></pre>
+
+<p>The <code>.base.*</code> files are runnable as-is. They give you a 7-method CRUD controller, a <code>DefaultCrudRepository</code>, and a <code>@model</code> class with no TypeScript written by hand.</p>
+<p>For custom finders, route overrides, lifecycle hooks, or interceptors, scaffold a user-owned extension:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">override</span><span class="hl-1"> </span><span class="hl-2">controller</span><span class="hl-1"> </span><span class="hl-2">order</span>
+</code><button type="button">Copy</button></pre>
+
+<p>This writes <code>src/controllers/order.controller.ts</code>, which is user-owned and never regenerated. See <a href="#overrides">Overrides</a> below for the full set.</p>
+<p>Enable sidecars:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">gen</span><span class="hl-1"> </span><span class="hl-4">--emit-zod</span><span class="hl-1"> </span><span class="hl-4">--emit-types</span><span class="hl-1"> </span><span class="hl-4">--emit-mock-data</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Additional outputs:</p>
+<pre><code class="txt">src/
+  models/
+    order.zod.ts
+    order.types.ts
+    order.mock.json
+</code><button type="button">Copy</button></pre>
+
+</details>
+<details>
+<summary><strong>Generated file rules</strong></summary>
+<p>The generator separates machine-owned files from user-owned files.</p>
+<table>
+<thead>
+<tr>
+<th>File type</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.base.*</code> files</td>
+<td>regenerated on every generation</td>
+</tr>
+<tr>
+<td>override files</td>
+<td>scaffolded once</td>
+</tr>
+<tr>
+<td><code>_meta/</code> files</td>
+<td>regenerated</td>
+</tr>
+<tr>
+<td><code>.loopback/cache/</code></td>
+<td>generated cache</td>
+</tr>
+<tr>
+<td><code>schemas/</code></td>
+<td>authored by the user</td>
+</tr>
+<tr>
+<td><code>configs/</code></td>
+<td>authored by the user</td>
+</tr>
+</tbody>
+</table>
+<p>Do not edit <code>.base.*</code> files directly. Use overrides for custom logic.</p>
+</details>
+<details id="overrides">
+<summary><strong>Overrides</strong></summary>
+<p>Create a user-owned override:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">override</span><span class="hl-1"> </span><span class="hl-2">controller</span><span class="hl-1"> </span><span class="hl-2">order</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Generated:</p>
+<pre><code class="txt">src/controllers/order.controller.ts
+</code><button type="button">Copy</button></pre>
+
+<p>Machine-owned file:</p>
+<pre><code class="txt">src/controllers/order.base.controller.ts
+</code><button type="button">Copy</button></pre>
+
+<p>This keeps regeneration safe.</p>
+</details>
+<details>
+<summary><strong>Project layout</strong></summary>
+<pre><code class="txt">my-app/
+  loopback.config.json
+  datasources.json
+
+  schemas/
+    order.schema.json
+
+  configs/
+    order.config.json
+
+  _meta/
+    model-config.schema.json
+    datasources.schema.json
+    emitter.schema.json
+    loopback-config.schema.json
+
+  .loopback/
+    cache/
+
+  emitters/
+    audit-envelope.emitter.json
+
+  src/
+    models/
+    repositories/
+    controllers/
+    datasources/
+</code><button type="button">Copy</button></pre>
+
+</details>
+<details>
+<summary><strong>CLI reference</strong></summary>
+<h3 id="_" class="tsd-anchor-link"><code>lb-contracts init</code><a href="#_" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Scaffolds:</p>
+<pre><code class="txt">loopback.config.json
+</code><button type="button">Copy</button></pre>
+
+<p>Configures:</p>
+<ul>
+<li>schema directories</li>
+<li>remote schema sources</li>
+<li>sidecar defaults</li>
+<li>validator settings</li>
+<li>generation behavior</li>
+</ul>
+<h3 id="_-1" class="tsd-anchor-link"><code>lb-contracts contract &lt;name&gt;</code><a href="#_-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Scaffolds:</p>
+<pre><code class="txt">schemas/&lt;name&gt;.schema.json
+configs/&lt;name&gt;.config.json
+</code><button type="button">Copy</button></pre>
+
+<h3 id="_-2" class="tsd-anchor-link"><code>lb-contracts ds &lt;name&gt; --adapter &lt;kind&gt;</code><a href="#_-2" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Adds datasource configuration.</p>
+<p>Example:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">ds</span><span class="hl-1"> </span><span class="hl-2">primary</span><span class="hl-1"> </span><span class="hl-4">--adapter</span><span class="hl-1"> </span><span class="hl-2">memory</span>
+</code><button type="button">Copy</button></pre>
+
+<h3 id="_-3" class="tsd-anchor-link"><code>lb-contracts override &lt;kind&gt; &lt;contract&gt;</code><a href="#_-3" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Scaffolds a user-owned extension file.</p>
+<p>Examples:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">override</span><span class="hl-1"> </span><span class="hl-2">model</span><span class="hl-1"> </span><span class="hl-2">order</span><br/><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">override</span><span class="hl-1"> </span><span class="hl-2">repository</span><span class="hl-1"> </span><span class="hl-2">order</span><br/><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">override</span><span class="hl-1"> </span><span class="hl-2">controller</span><span class="hl-1"> </span><span class="hl-2">order</span>
+</code><button type="button">Copy</button></pre>
+
+<h3 id="_-4" class="tsd-anchor-link"><code>lb-contracts gen</code><a href="#_-4" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Runs the full generation pipeline.</p>
+<p>Generates:</p>
+<ul>
+<li><code>_meta/*.schema.json</code></li>
+<li><code>.base.*</code> files</li>
+<li>sidecars</li>
+<li>barrels</li>
+<li>OpenAPI output</li>
+</ul>
+<h3 id="_-5" class="tsd-anchor-link"><code>lb-contracts gen --watch</code><a href="#_-5" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Continuous generation mode.</p>
+<p>Alias:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">dev</span>
+</code><button type="button">Copy</button></pre>
+
+<h3 id="_-6" class="tsd-anchor-link"><code>lb-contracts validate</code><a href="#_-6" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Runs validation only. Useful for CI.</p>
+<h3 id="_-7" class="tsd-anchor-link"><code>lb-contracts gen --strict</code><a href="#_-7" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Promotes lossy-translation warnings to errors.</p>
+<h3 id="_-8" class="tsd-anchor-link"><code>lb-contracts gen --skip-tsc</code><a href="#_-8" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Skips final TypeScript validation.</p>
+</details>
+<details>
+<summary><strong>Configuration</strong></summary>
+<p>Every emit flag has a matching <code>loopback.config.json</code> setting.</p>
+<p>Example:</p>
+<pre><code class="json"><span class="hl-1">{</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;emit&quot;</span><span class="hl-1">: {</span><br/><span class="hl-1">    </span><span class="hl-5">&quot;zod&quot;</span><span class="hl-1">: </span><span class="hl-4">true</span><span class="hl-1">,</span><br/><span class="hl-1">    </span><span class="hl-5">&quot;types&quot;</span><span class="hl-1">: </span><span class="hl-4">true</span><span class="hl-1">,</span><br/><span class="hl-1">    </span><span class="hl-5">&quot;openapi-components&quot;</span><span class="hl-1">: </span><span class="hl-4">true</span><span class="hl-1">,</span><br/><span class="hl-1">    </span><span class="hl-5">&quot;mock-data&quot;</span><span class="hl-1">: </span><span class="hl-4">true</span><br/><span class="hl-1">  }</span><br/><span class="hl-1">}</span>
+</code><button type="button">Copy</button></pre>
+
+</details>
+<details>
+<summary><strong>Schema sources</strong></summary>
+<p>Supported schema sources:</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>local directory</td>
+<td><code>./schemas/</code></td>
+</tr>
+<tr>
+<td>npm package</td>
+<td><code>npm:@my-org/contracts@^1.2.0</code></td>
+</tr>
+<tr>
+<td>git+https</td>
+<td><code>git+https://github.com/my-org/contracts.git#v1.2.0</code></td>
+</tr>
+<tr>
+<td>https</td>
+<td><code>https://example.com/contracts/order.schema.json</code></td>
+</tr>
+</tbody>
+</table>
+<p>Remote schemas are cached under:</p>
+<pre><code class="txt">.loopback/cache/
+</code><button type="button">Copy</button></pre>
+
+</details>
+<details>
+<summary><strong>Validation pipeline</strong></summary>
+<p>Generation follows a deterministic pipeline:</p>
+<ol>
+<li>source fetch</li>
+<li>JSON Schema validation</li>
+<li>schema dedupe</li>
+<li><code>$ref</code> resolution</li>
+<li>config validation</li>
+<li>backward-compatibility diff</li>
+<li>codegen and emitter dispatch</li>
+<li><code>tsc --noEmit</code></li>
+</ol>
+</details>
+<details>
+<summary><strong>Extension points</strong></summary>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>EMITTER_TAG</code></td>
+<td>add projection emitters</td>
+</tr>
+<tr>
+<td><code>SOURCE_TAG</code></td>
+<td>add schema source resolvers</td>
+</tr>
+<tr>
+<td><code>SOURCE_EXTENSION_TAG</code></td>
+<td>contribute import-source wizard entries</td>
+</tr>
+<tr>
+<td><code>EXTENSION_KEYWORD_TAG</code></td>
+<td>custom <code>x-*</code> keywords</td>
+</tr>
+<tr>
+<td><code>META_SCHEMA_CONTRIBUTOR_TAG</code></td>
+<td>contribute generated meta-schema options</td>
+</tr>
+<tr>
+<td><code>VALIDATOR_TAG</code></td>
+<td>add Ajv formats or keywords</td>
+</tr>
+</tbody>
+</table>
+</details>
+<details>
+<summary><strong>Emitters</strong></summary>
+<p>Emitters transform contracts into generated outputs.</p>
+<p>Built-in emitters include:</p>
+<ul>
+<li>LoopBack model</li>
+<li>repository</li>
+<li>controller</li>
+<li>datasource</li>
+<li>OpenAPI</li>
+<li>Zod</li>
+<li>TypeScript types</li>
+<li>GraphQL</li>
+<li>CloudEvents</li>
+<li>AsyncAPI</li>
+<li>Protocol Buffers</li>
+<li>Avro</li>
+<li>mock fixtures</li>
+</ul>
+<h3 id="code-based-emitters" class="tsd-anchor-link">Code-based emitters<a href="#code-based-emitters" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Use when generation requires real translation logic.</p>
+<p>Examples:</p>
+<ul>
+<li>GraphQL</li>
+<li>Protocol Buffers</li>
+<li>Avro</li>
+<li>custom SDK generation</li>
+</ul>
+<h3 id="manifest-backed-emitters" class="tsd-anchor-link">Manifest-backed emitters<a href="#manifest-backed-emitters" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Use when the projection is mostly mechanical.</p>
+<p>Example:</p>
+<pre><code class="txt">emitters/
+  audit-envelope.emitter.json
+  audit-envelope.ejs
+</code><button type="button">Copy</button></pre>
+
+<p>Useful for:</p>
+<ul>
+<li>local project emitters</li>
+<li>custom wrappers</li>
+<li>organization-specific templates</li>
+<li>lightweight projections</li>
+</ul>
+</details>
+<details>
+<summary><strong>Lossy translation</strong></summary>
+<p>JSON Schema is more expressive than many target formats.</p>
+<p>Examples:</p>
+<ul>
+<li>unions may not map perfectly to GraphQL</li>
+<li>validation keywords may not map cleanly to Protocol Buffers</li>
+</ul>
+<p>Warnings are aggregated at generation time.</p>
+<p>Use strict mode in CI:</p>
+<pre><code class="bash"><span class="hl-0">lb-contracts</span><span class="hl-1"> </span><span class="hl-2">gen</span><span class="hl-1"> </span><span class="hl-4">--strict</span>
+</code><button type="button">Copy</button></pre>
+
+</details>
+<details>
+<summary><strong>OpenAPI output</strong></summary>
+<p>OpenAPI 3.1 is generated from JSON Schema contracts.</p>
+<p>OpenAPI is a projection of the schema-first workflow, not the source of truth.</p>
+</details>
+<details>
+<summary><strong>Importing from other formats</strong></summary>
+<p>Import workflows belong in the sibling package:</p>
+<pre><code class="txt">@ebarahona/loopback-contracts-import
+</code><button type="button">Copy</button></pre>
+
+<p>Potential import sources:</p>
+<ul>
+<li>Zod</li>
+<li>OpenAPI</li>
+<li>WSDL</li>
+<li>Avro</li>
+<li>Protocol Buffers</li>
+<li>GraphQL SDL</li>
+<li>AsyncAPI</li>
+</ul>
+<p>Imported schemas become standard JSON Schema contracts.</p>
+</details>
+<details>
+<summary><strong>Why not just use OpenAPI Generator?</strong></summary>
+<p>OpenAPI Generator is excellent for generic clients and servers.</p>
+<p><code>@ebarahona/loopback-contracts</code> focuses specifically on LoopBack 4 conventions:</p>
+<ul>
+<li><code>@model</code></li>
+<li><code>@property</code></li>
+<li>repositories</li>
+<li>controllers</li>
+<li>datasources</li>
+<li>generated barrels</li>
+<li>extension-friendly regeneration</li>
+</ul>
+<p>The goal is not to replace every OpenAPI generator. The goal is to make LoopBack 4 contract-first development faster and safer.</p>
+</details>
+<details>
+<summary><strong>Why JSON Schema first?</strong></summary>
+<p>JSON Schema can describe data independently from a specific framework.</p>
+<p>From one schema we can project:</p>
+<ul>
+<li>LoopBack models</li>
+<li>OpenAPI</li>
+<li>validators</li>
+<li>generated types</li>
+<li>mock data</li>
+<li>event sidecars</li>
+</ul>
+<p>This keeps framework code downstream from contracts.</p>
+</details>
+<details>
+<summary><strong>LoopBack 4 fit</strong></summary>
+<p>LoopBack 4 already provides:</p>
+<ul>
+<li>dependency injection</li>
+<li>repositories</li>
+<li>datasources</li>
+<li>controllers</li>
+<li>extension points</li>
+<li>runtime composition</li>
+</ul>
+<p><code>@ebarahona/loopback-contracts</code> generates into those primitives rather than replacing them.</p>
+</details>
+<details>
+<summary><strong>Coming from LoopBack 3</strong></summary>
+<p>LoopBack 3 users often miss how quickly they could move from a model to a working API.</p>
+<p>This project aims to recover that speed while modernizing around:</p>
+<ul>
+<li>TypeScript</li>
+<li>OpenAPI</li>
+<li>dependency injection</li>
+<li>composable architecture</li>
+</ul>
+</details>
+<details>
+<summary><strong>Coming from NestJS</strong></summary>
+<p>NestJS is application-first. This package is contract-first.</p>
+<p>Instead of wiring DTOs, decorators, validators, and generated types separately, contracts become the foundation of the system.</p>
+</details>
+<details>
+<summary><strong>Current package format</strong></summary>
+<p>The package currently ships as CommonJS.</p>
+<pre><code class="json"><span class="hl-1">{</span><br/><span class="hl-1">  </span><span class="hl-5">&quot;type&quot;</span><span class="hl-1">: </span><span class="hl-2">&quot;commonjs&quot;</span><br/><span class="hl-1">}</span>
+</code><button type="button">Copy</button></pre>
+
+</details>
+<details>
+<summary><strong>Security notes</strong></summary>
+<p>Remote schema sources and local emitters should be treated as codegen inputs.</p>
+<p>Review:</p>
+<pre><code class="txt">docs/security.md
+</code><button type="button">Copy</button></pre>
+
+<p>Especially when using:</p>
+<ul>
+<li>remote HTTPS schemas</li>
+<li>git-based schemas</li>
+<li>npm schema sources</li>
+<li>local emitters</li>
+</ul>
+</details>
+<details>
+<summary><strong>Recommended gitignore entries</strong></summary>
+<pre><code class="gitignore">_meta/
+.loopback/cache/
+</code><button type="button">Copy</button></pre>
+
+</details>
+<hr>
+<h1 id="documentation" class="tsd-anchor-link">Documentation<a href="#documentation" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<ul>
+<li><a href="media/cli.md">CLI reference</a></li>
+<li><a href="media/architecture.md">Architecture</a></li>
+<li><a href="media/emitters.md">Emitters</a></li>
+<li><a href="media/security.md">Security</a></li>
+<li><a href="media/CONTRIBUTING.md">Contributing</a></li>
+<li><a href="media/HELP_WANTED.md">Help wanted</a></li>
+<li><a href="media/STYLE_GUIDE.md">Style guide</a></li>
+<li><a href="media/ROADMAP.md">Roadmap</a></li>
+</ul>
+<p>API reference:</p>
+<ul>
+<li><a href="https://ebarahona.github.io/loopback-contracts">TypeDoc</a></li>
+</ul>
+<details>
+<summary><strong>Development</strong></summary>
+<p>Install dependencies:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">install</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Build:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-2">build</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Run tests:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">test</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Run unit tests:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-2">test:unit</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Run integration tests:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-2">test:integration</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Lint:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-2">lint</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Format:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-2">format</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Run local CLI:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-2">cli</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Generate TypeDoc:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-2">docs</span>
+</code><button type="button">Copy</button></pre>
+
+</details>
+<details>
+<summary><strong>Design principles</strong></summary>
+<h3 id="contracts-are-source-of-truth" class="tsd-anchor-link">Contracts are source of truth<a href="#contracts-are-source-of-truth" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Framework code should derive from contracts.</p>
+<h3 id="generated-code-must-be-safe-to-regenerate" class="tsd-anchor-link">Generated code must be safe to regenerate<a href="#generated-code-must-be-safe-to-regenerate" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Machine-owned files use <code>.base.*</code>.</p>
+<p>User-owned files are scaffolded once.</p>
+<h3 id="sidecars-are-opt-in" class="tsd-anchor-link">Sidecars are opt-in<a href="#sidecars-are-opt-in" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Projects should only pay for the outputs they use.</p>
+<h3 id="extension-points-should-be-real-extension-points" class="tsd-anchor-link">Extension points should be real extension points<a href="#extension-points-should-be-real-extension-points" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Emitters, validators, schema sources, and meta-schema contributors should be pluggable.</p>
+<h3 id="loopback-conventions-matter" class="tsd-anchor-link">LoopBack conventions matter<a href="#loopback-conventions-matter" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Generated output should feel native to LoopBack 4.</p>
+</details>
+<details>
+<summary><strong>Roadmap</strong></summary>
+<p>See <a href="media/ROADMAP.md">ROADMAP.md</a>.</p>
+<p>Areas being explored:</p>
+<ul>
+<li>additional emitters</li>
+<li>stronger manifest-backed workflows</li>
+<li>richer examples</li>
+<li>improved DX</li>
+<li>ESM compatibility exploration</li>
+</ul>
+</details>
+<hr>
+<h1 id="contributing" class="tsd-anchor-link">Contributing<a href="#contributing" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p>Contributions are welcome.</p>
+<p>Good areas to help:</p>
+<ul>
+<li>docs</li>
+<li>examples</li>
+<li>emitters</li>
+<li>tests</li>
+<li>source resolvers</li>
+<li>validators</li>
+<li>DX improvements</li>
+</ul>
+<p>Read:</p>
+<ul>
+<li><a href="media/CONTRIBUTING.md">CONTRIBUTING.md</a></li>
+<li><a href="media/HELP_WANTED.md">HELP_WANTED.md</a></li>
+<li><a href="media/STYLE_GUIDE.md">STYLE_GUIDE.md</a></li>
+<li><a href="media/CODE_OF_CONDUCT.md">CODE_OF_CONDUCT.md</a></li>
+</ul>
+<hr>
+<h1 id="license" class="tsd-anchor-link">License<a href="#license" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p>MIT</p>
+</div></div><div class="col-sidebar"><div class="page-menu"><div class="tsd-navigation settings"><details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-chevronDown"></use></svg><h3>Settings</h3></summary><div class="tsd-accordion-details"><div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span><ul id="tsd-filter-options"><li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li><li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div><div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div><details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-chevronDown"></use></svg><h3>On This Page</h3></summary><div class="tsd-accordion-details"><a href="#ebarahonaloopback-contracts"><span>@ebarahona/loopback-<wbr/>contracts</span></a><a href="#quickstart"><span>Quickstart</span></a><ul><li><a href="#1-define-a-model-via-cli"><span>1. <wbr/>Define a model via <wbr/>CLI</span></a></li><li><a href="#2-use-a-local-json-schema"><span>2. <wbr/>Use a local <wbr/>JSON <wbr/>Schema</span></a></li><li><a href="#output-both-paths"><span>Output (both paths)</span></a></li></ul><a href="#mental-model"><span>Mental model</span></a><ul><li><ul><li><a href="#former-loopback-3-users"><span>Former <wbr/>Loop<wbr/>Back 3 users</span></a></li><li><a href="#nestjs-users"><span>Nest<wbr/>JS users</span></a></li></ul></li></ul><a href="#installation"><span>Installation</span></a><ul><li><ul><li><a href="#_"><span></span></a></li><li><a href="#_-1"><span></span></a></li><li><a href="#_-2"><span></span></a></li><li><a href="#_-3"><span></span></a></li><li><a href="#_-4"><span></span></a></li><li><a href="#_-5"><span></span></a></li><li><a href="#_-6"><span></span></a></li><li><a href="#_-7"><span></span></a></li><li><a href="#_-8"><span></span></a></li><li><a href="#code-based-emitters"><span>Code-<wbr/>based emitters</span></a></li><li><a href="#manifest-backed-emitters"><span>Manifest-<wbr/>backed emitters</span></a></li></ul></li></ul><a href="#documentation"><span>Documentation</span></a><ul><li><ul><li><a href="#contracts-are-source-of-truth"><span>Contracts are source of truth</span></a></li><li><a href="#generated-code-must-be-safe-to-regenerate"><span>Generated code must be safe to regenerate</span></a></li><li><a href="#sidecars-are-opt-in"><span>Sidecars are opt-<wbr/>in</span></a></li><li><a href="#extension-points-should-be-real-extension-points"><span>Extension points should be real extension points</span></a></li><li><a href="#loopback-conventions-matter"><span>Loop<wbr/>Back conventions matter</span></a></li></ul></li></ul><a href="#contributing"><span>Contributing</span></a><a href="#license"><span>License</span></a></div></details></div><div class="site-menu"><nav id="tsd-sidebar-links" class="tsd-navigation"><a href="https://github.com/ebarahona/loopback-contracts" class="tsd-nav-link">GitHub</a><a href="https://github.com/ebarahona/loopback-contracts/blob/main/STYLE_GUIDE.md" class="tsd-nav-link">Style Guide</a></nav><nav class="tsd-navigation"><a href="modules.html">@ebarahona/loopback-contracts - v0.1.0</a><ul class="tsd-small-nested-navigation" id="tsd-nav-container"><li>Loading...</li></ul></nav></div></div></div><footer><p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer><div class="overlay"></div></body></html>
