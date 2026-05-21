@@ -85,13 +85,21 @@ The engine picks up every `schemas/*.schema.json` file and its matching `configs
 
 ```txt
 src/
-  models/order.base.model.ts
-  repositories/order.base.repository.ts
-  controllers/order.base.controller.ts
-  datasources/primary.base.datasource.ts
+  models/
+    order.base.model.ts            # generated, regenerated on every `lb-contracts gen`
+    order.model.ts                 # editable, scaffolded by `lb-contracts override model order`
+  repositories/
+    order.base.repository.ts       # generated
+    order.repository.ts            # editable, scaffolded by `lb-contracts override repository order`
+  controllers/
+    order.base.controller.ts       # generated
+    order.controller.ts            # editable, scaffolded by `lb-contracts override controller order`
+  datasources/
+    primary.base.datasource.ts     # generated
+    primary.datasource.ts          # editable, scaffolded by `lb-contracts override datasource primary`
 ```
 
-The `.base.*` files are runnable as-is. For custom finders, route overrides, or interceptors, scaffold a user-owned extension with `lb-contracts override <kind> <contract>`. See [Overrides](#overrides).
+The `.base.*` files are runnable as-is. The companions (no `.base.` infix) are user-owned: scaffolded once by `lb-contracts override`, owned by you forever, never overwritten by `gen`. Custom finders, route overrides, lifecycle hooks, and interceptors live there. See [Overrides](#overrides).
 
 ---
 
