@@ -80,8 +80,9 @@ export interface LoopbackConfigJson {
  *
  * The block is new pre-v1.0 surface — the shape may evolve in a minor
  * before promotion to `@public`. Every `security.http.*` field is honored
- * at runtime by `HttpSchemaSource` with precedence `config \> env \> default`;
- * env-var overrides use the `LOOPBACK_CONTRACTS_*` namespace.
+ * at runtime by `HttpSchemaSource`. A small set of operator escape hatches
+ * also have env-var fallbacks in the `LOOPBACK_CONTRACTS_*` namespace; fields
+ * without an env var are controlled solely by config + default.
  *
  * @experimental
  */
@@ -89,8 +90,9 @@ export interface SecurityConfig {
   /**
    * HTTP-source guardrails. Mitigates SSRF, memory exhaustion, and
    * DNS-rebinding attacks against the engine's HTTP/HTTPS schema fetcher.
-   * Every field below is honored at runtime by `HttpSchemaSource` with
-   * precedence `config \> LOOPBACK_CONTRACTS_<FIELD> env \> default`.
+   * Every field below is honored at runtime by `HttpSchemaSource`. For fields
+   * with an env fallback, precedence is config \> env \> default. Otherwise
+   * precedence is config \> default.
    */
   readonly http?: {
     /**
@@ -118,31 +120,26 @@ export interface SecurityConfig {
      * Re-resolve the host and re-check the IP after redirect chains.
      * Mitigates DNS rebinding where the first lookup resolves a public
      * IP and a follow-up resolves an internal one. Honored at runtime by
-     * `HttpSchemaSource`. Precedence: config \>
-     * `LOOPBACK_CONTRACTS_VERIFY_RESOLVED_IPS` env \> default `true`.
+     * `HttpSchemaSource`. Precedence: config \> default `true`.
      */
     readonly verifyResolvedIps?: boolean;
     /**
      * Optional explicit allowlist of hostnames. When set, fetches against
      * any other host fail loud. Mitigates exfil/SSRF by narrowing the
      * egress surface to known partners. Honored at runtime by
-     * `HttpSchemaSource`. Precedence: config \>
-     * `LOOPBACK_CONTRACTS_ALLOWED_HOSTS` env (comma-separated) \> default
-     * unset (no allowlist; any public host permitted subject to other
-     * guards).
+     * `HttpSchemaSource`. Precedence: config \> default unset (no allowlist;
+     * any public host permitted subject to other guards).
      */
     readonly allowedHosts?: readonly string[];
     /**
      * Follow 3xx redirects. Honored at runtime by `HttpSchemaSource`.
-     * Precedence: config \> `LOOPBACK_CONTRACTS_ALLOW_REDIRECTS` env \>
-     * default `true`.
+     * Precedence: config \> default `true`.
      */
     readonly allowRedirects?: boolean;
     /**
      * Maximum redirect-chain length. Mitigates redirect-loop DoS and
      * limits the number of DNS lookups per fetch. Honored at runtime by
-     * `HttpSchemaSource`. Precedence: config \>
-     * `LOOPBACK_CONTRACTS_MAX_REDIRECTS` env \> default `10`.
+     * `HttpSchemaSource`. Precedence: config \> default `10`.
      */
     readonly maxRedirects?: number;
     /**

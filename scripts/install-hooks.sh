@@ -16,6 +16,21 @@ if [ -n "$CI" ]; then
   exit 0
 fi
 
+# Skip during `npm pack` / `npm publish` (including `--dry-run`).
+# `prepare` is also invoked by those commands, but there's nothing to
+# opt into at publish time -- and the opt-in nudge below is pure noise
+# in that context. npm 7+ sets `npm_command` to the top-level
+# subcommand; older versions don't, so we also check the
+# `npm_config_dry_run` flag as a belt-and-suspenders signal.
+case "$npm_command" in
+  pack|publish)
+    exit 0
+    ;;
+esac
+if [ "$npm_config_dry_run" = "true" ]; then
+  exit 0
+fi
+
 if npx lefthook install; then
   exit 0
 fi

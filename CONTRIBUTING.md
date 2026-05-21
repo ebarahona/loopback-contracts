@@ -39,7 +39,7 @@ The day-to-day inner loop for contract authors and emitter contributors:
 npm run cli -- gen
 ```
 
-Runs the engine end-to-end against the fixture project under `src/__tests__/fixtures/`. Add `--watch` for chokidar-driven regen on every save, or pass `--emit-<kind>` flags to exercise individual sidecar emitters. The same CLI binary ships as `lb4` once the package is installed.
+Runs the engine end-to-end against the fixture project under `src/__tests__/fixtures/`. Add `--watch` for chokidar-driven regen on every save, or pass `--emit-<kind>` flags to exercise individual sidecar emitters. The same CLI binary ships as `lb-contracts` once the package is installed.
 
 ### Test scripts
 
@@ -104,6 +104,20 @@ Several pieces of the plugin are scaffolded but waiting for community contributi
 ## Releases
 
 Releases are automated by [release-please](https://github.com/googleapis/release-please). Maintainers do not tag manually. Once a release PR is merged, the workflow tags, publishes to npm, and updates `CHANGELOG.md`.
+
+### Local `npm pack` / `npm publish` notes
+
+Both commands run the `prepare` script as part of npm's lifecycle. The local hook installer (`scripts/install-hooks.sh`) detects `npm_command=pack` / `npm_command=publish` (and `--dry-run`) and skips silently in that context — no dev-onboarding nudge during a publish.
+
+If `npm pack --dry-run` errors with `EACCES` against `~/.npm` (a stale-permission case from a previous `sudo npm install`), use a per-invocation cache instead of touching your global cache directory:
+
+```bash
+npm --cache /tmp/loopback-contracts-npm-cache pack --dry-run
+# or for a real publish:
+npm --cache /tmp/loopback-contracts-npm-cache publish
+```
+
+The repo does NOT ship an `.npmrc` overriding the cache — that would inflict a project-local cache on every contributor regardless of their setup. The `--cache` flag is the cleanest one-shot override that doesn't touch any global config.
 
 ## Branch protection (maintainer one-time setup)
 
