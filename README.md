@@ -1,14 +1,25 @@
 # @ebarahona/loopback-contracts
 
-Contract (JSON Schema-first) code generation for LoopBack 4.
+Contract (JSON Schema-first) code generation and projection architecture for LoopBack 4.
 
-`@ebarahona/loopback-contracts` turns JSON Schema 2020-12 contracts into LoopBack 4 models, repositories, controllers, datasources, OpenAPI 3.1 output, and optional sidecar formats such as Zod, TypeScript types, GraphQL, AsyncAPI, Protocol Buffers, Avro, CloudEvents, OpenAPI components, and mock fixtures.
+`@ebarahona/loopback-contracts` turns JSON Schema contracts into OpenAPI 3.1 specifications, then projects those specifications into LoopBack 4 runtime artifacts such as models, repositories, controllers, datasources, and optional ecosystem sidecars.
 
-It is built for teams that want the speed of contract-driven scaffolding without giving up LoopBack 4's runtime dynamic dependency injection, extension points, and composable architecture.
+Optional sidecar emitters can also generate:
+- Zod validators
+- TypeScript types
+- GraphQL
+- AsyncAPI
+- Protocol Buffers
+- Avro
+- CloudEvents
+- OpenAPI component fragments
+- mock fixtures
+
+It is built for teams that want the speed of contract-driven scaffolding without giving up LoopBack 4's dynamic dependency injection, extension points, and composable runtime architecture.
 
 ---
 
-## Why this exists
+# Why this exists
 
 Most backend teams end up describing the same shape multiple times:
 
@@ -18,28 +29,181 @@ Most backend teams end up describing the same shape multiple times:
 - repositories
 - controllers
 - validators
-- SDK types
+- generated types
+- SDKs
 - event payloads
 - mock fixtures
-- GraphQL or AsyncAPI sidecars
 
 Over time, those definitions drift.
 
 `@ebarahona/loopback-contracts` makes JSON Schema the source of truth.
 
-Define the contract once. Generate the rest.
+Define the contract once.
+Generate the rest.
 
 ---
 
-## What it generates
+# Mental model
+
+```mermaid
+graph LR
+
+  A[JSON Schema 2020-12]
+    --> B[OpenAPI 3.1 Projection]
+
+  B --> C[LoopBack Models]
+  B --> D[Repositories]
+  B --> E[Controllers]
+  B --> F[Datasources]
+
+  B --> G[Zod]
+  B --> H[TypeScript Types]
+  B --> I[GraphQL]
+  B --> J[AsyncAPI]
+  B --> K[CloudEvents]
+  B --> L[Proto / Avro]
+  B --> M[Mock Fixtures]
+```
+
+The contract is the source of truth.
+
+Everything else is a projection.
+
+---
+
+# What this project is
+
+`@ebarahona/loopback-contracts` is:
+- a JSON Schema-first code generation system
+- a projection pipeline
+- a LoopBack-oriented generator architecture
+- an extensible emitter framework
+- a contract-first backend workflow
+
+---
+
+# What this project is NOT
+
+`@ebarahona/loopback-contracts` is NOT:
+- a runtime transport framework
+- a Kafka framework
+- a Redis Streams framework
+- a queue system
+- a workflow engine
+- a NestJS replacement
+
+Some generated sidecars such as AsyncAPI or CloudEvents can describe message contracts, but this package does not provide the runtime infrastructure that sends, receives, retries, persists, or orchestrates messages.
+
+---
+
+# Who this is for
+
+- Existing LoopBack 4 teams who want less boilerplate while preserving LB4's dependency injection, repositories, extension points, and OpenAPI-first architecture
+- LoopBack 3 developers who miss rapid model-first API development and want a modern TypeScript migration path without giving up productivity
+- NestJS developers interested in stronger contract-first workflows, runtime composition, and LoopBack 4's dynamic dependency injection and extension system
+- Platform and infrastructure teams using a single contract to generate and synchronize APIs, backend services, mobile clients, validators, schemas, edge runtimes (Lambda, Cloud Run, Workers), and reusable architecture across an entire platform
+
+LoopBack 4 was designed differently from most Node.js frameworks.
+
+Instead of focusing primarily on decorators and application structure, LoopBack 4 uses a highly composable backend architecture built around:
+- runtime dependency injection
+- extension points
+- dynamic discovery
+- repository patterns
+- datasource abstraction
+- OpenAPI-first APIs
+- transport-agnostic composition
+- pluggable framework primitives
+
+These capabilities make LoopBack 4 especially powerful for:
+- platform engineering
+- reusable backend systems
+- multi-service architectures
+- framework extensions
+- large-scale enterprise applications
+
+But many teams still spend significant time manually wiring repetitive framework artifacts.
+
+`@ebarahona/loopback-contracts` preserves the architectural strengths and runtime flexibility of LoopBack 4 while dramatically reducing boilerplate through contract-first generation.
+
+Instead of manually maintaining:
+- models
+- repositories
+- controllers
+- validators
+- generated types
+- OpenAPI synchronization
+
+Define the contract once and project the framework artifacts automatically.
+
+---
+
+## Former LoopBack 3 users
+
+LoopBack 3 was fast.
+
+Many developers still miss:
+- rapid CRUD scaffolding
+- model-first workflows
+  - model.json
+  - model.config.json
+- convention-driven APIs
+- low-friction development
+
+`@ebarahona/loopback-contracts` aims to recover some of that productivity while preserving the architectural strengths of LoopBack 4:
+- TypeScript-first
+- Dependency Injection
+- OpenAPI-first APIs
+- extension points
+- composable runtime architecture
+
+---
+
+## NestJS users
+
+NestJS provides strong developer ergonomics and a familiar application structure.
+
+But as systems grow, many NestJS applications become heavily centered around statically wired modules, decorators, DTOs, validators, and generated types that must be manually synchronized across services and platforms.
+
+LoopBack 4 was designed differently.
+
+Its runtime architecture is built around:
+- dynamic dependency injection
+- extension points
+- runtime discovery
+- pluggable framework primitives
+- transport-agnostic composition
+
+This makes LoopBack 4 especially powerful for:
+- platform engineering
+- reusable backend systems
+- internal frameworks
+- multi-service architectures
+- contract-driven platforms
+
+`@ebarahona/loopback-contracts` combines that runtime flexibility with a contract-first workflow.
+
+Define the contract once and project:
+- OpenAPI specifications
+- models
+- repositories
+- controllers
+- validators
+- generated types
+- mobile/client contracts
+- edge runtime artifacts
+
+The contract becomes the source of truth for the entire platform.
+---
+
+# Features
 
 Core LoopBack outputs:
-
 - LoopBack 4 models
 - repositories
 - controllers
 - datasources
-- OpenAPI 3.1 document
+- OpenAPI 3.1 output
 - generated barrels
 - project meta-schemas
 
@@ -52,111 +216,21 @@ Optional sidecar outputs:
 | `--emit-graphql` | GraphQL code-first decorators |
 | `--emit-graphql-sdl` | GraphQL SDL |
 | `--emit-cloudevents` | typed CloudEvents wrappers |
-| `--emit-asyncapi` | AsyncAPI 3.0 message/catalog fragments |
+| `--emit-asyncapi` | AsyncAPI fragments |
 | `--emit-proto` | Protocol Buffers schema |
 | `--emit-avro` | Avro schema |
 | `--emit-openapi-components` | OpenAPI components fragment |
-| `--emit-mock-data` | mock JSON fixture |
+| `--emit-mock-data` | mock JSON fixtures |
 
 ---
 
-## What this is not
-
-`@ebarahona/loopback-contracts` is not:
-
-- a runtime transport framework
-- a Kafka framework
-- a Redis Streams framework
-- a queue system
-- a NestJS replacement
-- a generic OpenAPI generator replacement
-
-It is a JSON Schema-driven code generation substrate for LoopBack 4.
-
-Some generated sidecars, such as AsyncAPI or CloudEvents, can describe message contracts, but this package does not provide the runtime transport layer that sends, receives, retries, or persists messages.
-
----
-
-## Who this is for
-
-### Existing LoopBack 4 users
-
-Use this if we like LoopBack 4's architecture but want less manual wiring.
-
-It helps generate the repetitive pieces while keeping the parts that make LoopBack powerful:
-
-- dependency injection
-- extension points
-- repositories
-- datasources
-- controllers
-- OpenAPI integration
-- runtime composition
-
-### Former LoopBack 3 users
-
-LoopBack 3 was fast.
-
-Many teams still miss:
-
-- model-first development
-- quick CRUD scaffolding
-- convention-driven productivity
-- low-friction API creation
-
-This package brings back some of that speed on top of LoopBack 4's TypeScript-first architecture.
-
-### NestJS users
-
-NestJS has strong ergonomics, but many teams still duplicate contracts across:
-
-- DTOs
-- decorators
-- validators
-- Swagger metadata
-- generated types
-- event schemas
-
-`@ebarahona/loopback-contracts` takes a contract-first approach.
-
-The schema comes first. The framework artifacts are generated from it.
-
----
-
-## Mental model
-
-```mermaid
-graph LR
-  A[JSON Schema 2020-12] --> B[lb-contracts gen]
-
-  B --> C[LoopBack Models]
-  B --> D[Repositories]
-  B --> E[Controllers]
-  B --> F[Datasources]
-  B --> G[OpenAPI 3.1]
-
-  B --> H[Zod]
-  B --> I[TypeScript Types]
-  B --> J[GraphQL]
-  B --> K[AsyncAPI]
-  B --> L[CloudEvents]
-  B --> M[Proto / Avro]
-  B --> N[Mock Fixtures]
-```
-
-The contract is the source of truth.
-
-Everything else is a projection.
-
----
-
-## Installation
+# Installation
 
 ```bash
 npm install @ebarahona/loopback-contracts
 ```
 
-LoopBack 4 packages are peer dependencies:
+Install LoopBack peer dependencies:
 
 ```bash
 npm install @loopback/core @loopback/repository @loopback/rest
@@ -170,9 +244,10 @@ Node.js >= 20.19.0
 
 ---
 
-## Optional sidecar dependencies
+# Optional sidecar dependencies
 
-Sidecar generators are loaded lazily. Install only what we emit.
+Sidecars are loaded lazily.
+Install only what we emit.
 
 | Sidecar | Install |
 |---|---|
@@ -183,14 +258,12 @@ Sidecar generators are loaded lazily. Install only what we emit.
 | Avro | `npm install quicktype-core` |
 | CloudEvents | `npm install cloudevents` |
 | Mock data | `npm install json-schema-faker` |
-| AsyncAPI | no extra package |
-| OpenAPI components | no extra package |
 
 If an emit flag is enabled without the required package installed, generation fails fast with the missing package name and install command.
 
 ---
 
-## Quick start
+# Quick start
 
 Initialize the project:
 
@@ -216,7 +289,7 @@ Generate artifacts:
 lb-contracts gen
 ```
 
-Generate artifacts with sidecars:
+Generate with sidecars:
 
 ```bash
 lb-contracts gen --emit-zod --emit-types --emit-openapi-components
@@ -234,7 +307,7 @@ or:
 lb-contracts dev
 ```
 
-Validate authored files without writing generated output:
+Validate without writing generated output:
 
 ```bash
 lb-contracts validate
@@ -242,7 +315,7 @@ lb-contracts validate
 
 ---
 
-## Example workflow
+# Example workflow
 
 Create a contract:
 
@@ -250,7 +323,7 @@ Create a contract:
 lb-contracts contract order
 ```
 
-This creates:
+Generated files:
 
 ```txt
 schemas/order.schema.json
@@ -292,7 +365,7 @@ Generate:
 lb-contracts gen
 ```
 
-Generated files follow the `.base.*` convention:
+Generated output:
 
 ```txt
 src/
@@ -309,13 +382,13 @@ src/
     index.ts
 ```
 
-If sidecars are enabled:
+Enable sidecars:
 
 ```bash
 lb-contracts gen --emit-zod --emit-types --emit-mock-data
 ```
 
-Additional files are generated:
+Additional outputs:
 
 ```txt
 src/
@@ -327,20 +400,18 @@ src/
 
 ---
 
-## Generated file rules
+# Generated file rules
 
 The generator separates machine-owned files from user-owned files.
 
 | File type | Rule |
 |---|---|
-| `.base.*` files | regenerated on every `lb-contracts gen` |
-| extension files | scaffolded once with `lb-contracts override` |
-| `_meta/` files | regenerated, should not be committed |
-| `.loopback/cache/` | generated cache, should not be committed |
+| `.base.*` files | regenerated on every generation |
+| override files | scaffolded once |
+| `_meta/` files | regenerated |
+| `.loopback/cache/` | generated cache |
 | `schemas/` | authored by the user |
 | `configs/` | authored by the user |
-| `datasources.json` | authored by the user |
-| `loopback.config.json` | authored by the user |
 
 Do not edit `.base.*` files directly.
 
@@ -348,37 +419,31 @@ Use overrides for custom logic.
 
 ---
 
-## Overrides
+# Overrides
 
-Generated base files are safe to regenerate because custom code lives in extension files.
-
-Create an override:
+Create a user-owned override:
 
 ```bash
 lb-contracts override controller order
 ```
 
-Example output:
+Generated:
 
 ```txt
 src/controllers/order.controller.ts
 ```
 
-The generated base remains machine-owned:
+Machine-owned file:
 
 ```txt
 src/controllers/order.base.controller.ts
 ```
 
-The override file is user-owned and scaffolded once.
-
 This keeps regeneration safe.
 
 ---
 
-## Project layout
-
-A typical generated project looks like this:
+# Project layout
 
 ```txt
 my-app/
@@ -405,40 +470,16 @@ my-app/
 
   src/
     models/
-      order.base.model.ts
-      order.model.ts
-      order.zod.ts
-      order.types.ts
-      order.graphql.ts
-      order.cloudevents.ts
-      order.asyncapi.yaml
-      order.proto
-      order.avsc
-      order.openapi-components.yaml
-      order.mock.json
-      index.ts
-
     repositories/
-      order.base.repository.ts
-      order.repository.ts
-      index.ts
-
     controllers/
-      order.base.controller.ts
-      order.controller.ts
-      index.ts
-
     datasources/
-      primary.base.datasource.ts
-      primary.datasource.ts
-      index.ts
 ```
 
 ---
 
-## CLI reference
+# CLI reference
 
-### `lb-contracts init`
+## `lb-contracts init`
 
 Scaffolds:
 
@@ -446,19 +487,16 @@ Scaffolds:
 loopback.config.json
 ```
 
-Use this to configure:
-
+Configures:
 - schema directories
 - remote schema sources
-- default sidecar emission settings
+- sidecar defaults
 - validator settings
 - generation behavior
 
-The command refuses to overwrite an existing config.
-
 ---
 
-### `lb-contracts contract <name>`
+## `lb-contracts contract <name>`
 
 Scaffolds:
 
@@ -467,19 +505,11 @@ schemas/<name>.schema.json
 configs/<name>.config.json
 ```
 
-Use this to create a new JSON Schema contract and matching generation config.
-
-The command refuses to overwrite existing files.
-
 ---
 
-### `lb-contracts ds <name> --adapter <kind>`
+## `lb-contracts ds <name> --adapter <kind>`
 
-Adds a datasource entry to:
-
-```txt
-datasources.json
-```
+Adds datasource configuration.
 
 Example:
 
@@ -487,11 +517,9 @@ Example:
 lb-contracts ds primary --adapter memory
 ```
 
-The command refuses duplicate datasource entries.
-
 ---
 
-### `lb-contracts override <kind> <contract>`
+## `lb-contracts override <kind> <contract>`
 
 Scaffolds a user-owned extension file.
 
@@ -501,34 +529,26 @@ Examples:
 lb-contracts override model order
 lb-contracts override repository order
 lb-contracts override controller order
-lb-contracts override datasource primary
 ```
-
-Generated `.base.*` files continue to regenerate.
-
-Override files are user-owned and scaffolded once.
 
 ---
 
-### `lb-contracts gen`
+## `lb-contracts gen`
 
 Runs the full generation pipeline.
 
-It regenerates:
-
+Generates:
 - `_meta/*.schema.json`
-- `.base.*` TypeScript files
-- enabled sidecars
-- generated barrels
+- `.base.*` files
+- sidecars
+- barrels
 - OpenAPI output
-
-It does not overwrite authored contracts or override files.
 
 ---
 
-### `lb-contracts gen --watch`
+## `lb-contracts gen --watch`
 
-Runs generation continuously.
+Continuous generation mode.
 
 Alias:
 
@@ -538,37 +558,33 @@ lb-contracts dev
 
 ---
 
-### `lb-contracts validate`
+## `lb-contracts validate`
 
-Runs validation without writing generated files.
+Runs validation only.
 
-Useful in CI.
+Useful for CI.
 
 ---
 
-### `lb-contracts gen --strict`
+## `lb-contracts gen --strict`
 
 Promotes lossy-translation warnings to errors.
 
-Recommended for CI when we do not want silent approximations in sidecar output.
+---
+
+## `lb-contracts gen --skip-tsc`
+
+Skips final TypeScript validation.
 
 ---
 
-### `lb-contracts gen --skip-tsc`
-
-Skips the final `tsc --noEmit` validation stage.
-
-Useful for faster local reruns when TypeScript validation runs elsewhere.
-
----
-
-## Configuration
+# Configuration
 
 Every emit flag has a matching `loopback.config.json` setting.
 
 Example:
 
-```jsonc
+```json
 {
   "emit": {
     "zod": true,
@@ -579,17 +595,11 @@ Example:
 }
 ```
 
-With this configuration, a plain generation command uses those defaults:
-
-```bash
-lb-contracts gen
-```
-
 ---
 
-## Schema sources
+# Schema sources
 
-Schemas can come from multiple source kinds.
+Supported schema sources:
 
 | Source | Example |
 |---|---|
@@ -597,9 +607,6 @@ Schemas can come from multiple source kinds.
 | npm package | `npm:@my-org/contracts@^1.2.0` |
 | git+https | `git+https://github.com/my-org/contracts.git#v1.2.0` |
 | https | `https://example.com/contracts/order.schema.json` |
-| plugin source | `s3://...`, `oci://...`, or another resolver registered by a plugin |
-
-Source specs are configured in `loopback.config.json`.
 
 Remote schemas are cached under:
 
@@ -609,9 +616,9 @@ Remote schemas are cached under:
 
 ---
 
-## Validation pipeline
+# Validation pipeline
 
-Every `lb-contracts gen` run follows the same deterministic pipeline:
+Generation follows a deterministic pipeline:
 
 1. source fetch
 2. JSON Schema validation
@@ -622,40 +629,31 @@ Every `lb-contracts gen` run follows the same deterministic pipeline:
 7. codegen and emitter dispatch
 8. `tsc --noEmit`
 
-If a stage fails, the command stops with an actionable error.
-
 ---
 
-## Extension points
-
-The package exposes extension-point tags for plugins.
+# Extension points
 
 | Tag | Purpose |
 |---|---|
-| `EMITTER_TAG` | add a new projection emitter |
-| `SOURCE_TAG` | add a schema source resolver |
+| `EMITTER_TAG` | add projection emitters |
+| `SOURCE_TAG` | add schema source resolvers |
 | `SOURCE_EXTENSION_TAG` | contribute import-source wizard entries |
-| `EXTENSION_KEYWORD_TAG` | handle custom `x-*` JSON Schema keywords |
+| `EXTENSION_KEYWORD_TAG` | custom `x-*` keywords |
 | `META_SCHEMA_CONTRIBUTOR_TAG` | contribute generated meta-schema options |
 | `VALIDATOR_TAG` | add Ajv formats or keywords |
 
-Emitters registered under `EMITTER_TAG` become part of the generation pipeline.
-
-The CLI, init prompts, and generated meta-schemas can discover registered emitters without manually editing the CLI.
-
 ---
 
-## Emitters
+# Emitters
 
-An emitter turns a JSON Schema contract into an output artifact.
+Emitters transform contracts into generated outputs.
 
-Built-in emitter targets include:
-
+Built-in emitters include:
 - LoopBack model
-- LoopBack repository
-- LoopBack controller
+- repository
+- controller
 - datasource
-- OpenAPI 3.1
+- OpenAPI
 - Zod
 - TypeScript types
 - GraphQL
@@ -663,43 +661,27 @@ Built-in emitter targets include:
 - AsyncAPI
 - Protocol Buffers
 - Avro
-- OpenAPI components
 - mock fixtures
-
-There are two emitter contribution paths.
 
 ---
 
-### Code-based emitters
+## Code-based emitters
 
-Use a code-based emitter when the projection needs real translation logic.
+Use when generation requires real translation logic.
 
-Good examples:
-
-- Zod
+Examples:
 - GraphQL
 - Protocol Buffers
 - Avro
-- custom enterprise SDK generation
-- complex org-specific projections
-
-A code-based emitter is published as TypeScript and registered through LoopBack's extension system.
+- custom SDK generation
 
 ---
 
-### Manifest-backed emitters
+## Manifest-backed emitters
 
-Use a manifest-backed emitter when the projection is mostly mechanical.
+Use when the projection is mostly mechanical.
 
-Good examples:
-
-- internal event envelopes
-- audit wrappers
-- custom JSON/YAML mirrors
-- project-local templates
-- simple generated sidecars
-
-A manifest-backed emitter can be shipped as project files:
+Example:
 
 ```txt
 emitters/
@@ -707,23 +689,23 @@ emitters/
   audit-envelope.ejs
 ```
 
-This is useful when we want a local projection without publishing a TypeScript package.
+Useful for:
+- local project emitters
+- custom wrappers
+- organization-specific templates
+- lightweight projections
 
 ---
 
-## Lossy translation
+# Lossy translation
 
-JSON Schema 2020-12 is more expressive than many target formats.
-
-Some projections may lose information.
+JSON Schema is more expressive than many target formats.
 
 Examples:
+- unions may not map perfectly to GraphQL
+- validation keywords may not map cleanly to Protocol Buffers
 
-- JSON Schema unions may not map perfectly to GraphQL
-- certain validation keywords may not map cleanly to Protocol Buffers
-- format-specific metadata may need approximations
-
-The generator aggregates lossy-translation warnings at the end of generation.
+Warnings are aggregated at generation time.
 
 Use strict mode in CI:
 
@@ -733,141 +715,107 @@ lb-contracts gen --strict
 
 ---
 
-## OpenAPI output
+# OpenAPI output
 
-The engine generates OpenAPI 3.1 from JSON Schema contracts.
+OpenAPI 3.1 is generated from JSON Schema contracts.
 
-The goal is to keep the generated REST surface and the contract aligned.
-
-OpenAPI is an output of the schema-first workflow, not the source of truth.
+OpenAPI is a projection of the schema-first workflow, not the source of truth.
 
 ---
 
-## Importing from other formats
+# Importing from other formats
 
-`@ebarahona/loopback-contracts` consumes JSON Schema.
-
-Importing from other formats belongs in the sibling import package:
+Import workflows belong in the sibling package:
 
 ```txt
 @ebarahona/loopback-contracts-import
 ```
 
-That package covers the inverse direction, such as:
+Potential import sources:
+- Zod
+- OpenAPI
+- WSDL
+- Avro
+- Protocol Buffers
+- GraphQL SDL
+- AsyncAPI
 
-- Zod to JSON Schema
-- OpenAPI to JSON Schema
-- WSDL to JSON Schema
-- Avro to JSON Schema
-- Protocol Buffers to JSON Schema
-- GraphQL SDL to JSON Schema
-- AsyncAPI to JSON Schema
-- live database to JSON Schema
-
-Once imported, the generated `schemas/*.schema.json` files can be consumed by `@ebarahona/loopback-contracts`.
+Imported schemas become standard JSON Schema contracts.
 
 ---
 
-## Why not just use OpenAPI Generator?
+# Why not just use OpenAPI Generator?
 
 OpenAPI Generator is excellent for generic clients and servers.
 
-This project is focused on LoopBack 4-specific generation:
-
+`@ebarahona/loopback-contracts` focuses specifically on LoopBack 4 conventions:
 - `@model`
 - `@property`
 - repositories
 - controllers
 - datasources
 - generated barrels
-- LoopBack project layout
-- runtime dependency injection compatibility
-- extension-friendly regeneration rules
+- extension-friendly regeneration
 
 The goal is not to replace every OpenAPI generator.
 
-The goal is to make LoopBack 4 contract-first development faster, safer, and more consistent.
+The goal is to make LoopBack 4 contract-first development faster and safer.
 
 ---
 
-## Why JSON Schema first?
+# Why JSON Schema first?
 
-JSON Schema is a strong source of truth because it can describe data independently from a specific framework.
+JSON Schema can describe data independently from a specific framework.
 
-From one schema, the engine can project:
-
-- OpenAPI spec
+From one schema we can project:
 - LoopBack models
+- OpenAPI
 - validators
-- TypeScript types
+- generated types
 - mock data
 - event sidecars
-- schema fragments for other ecosystems
 
-This keeps framework code downstream from the contract.
+This keeps framework code downstream from contracts.
 
 ---
 
-## LoopBack 4 fit
+# LoopBack 4 fit
 
-LoopBack 4 is a strong fit because it already provides:
-
+LoopBack 4 already provides:
 - dependency injection
 - repositories
 - datasources
 - controllers
-- OpenAPI integration
 - extension points
-- lifecycle hooks
 - runtime composition
 
-`@ebarahona/loopback-contracts` does not fight those primitives.
-
-It generates into them.
+`@ebarahona/loopback-contracts` generates into those primitives rather than replacing them.
 
 ---
 
-## Coming from LoopBack 3
+# Coming from LoopBack 3
 
 LoopBack 3 users often miss how quickly they could move from a model to a working API.
 
-This project aims to recover that speed without going back to LB3's older architecture.
-
-Instead of:
-
-```txt
-model-config.json as the whole world
-```
-
-we use:
-
-```txt
-JSON Schema 2020-12
-+ model configs
-+ datasource configs
-+ generated LB4 artifacts
-+ user-owned overrides
-```
-
-The result is closer to LB3 productivity, but built on LB4's TypeScript and dependency injection model.
+This project aims to recover that speed while modernizing around:
+- TypeScript
+- OpenAPI
+- dependency injection
+- composable architecture
 
 ---
 
-## Coming from NestJS
+# Coming from NestJS
 
 NestJS is application-first.
 
 This package is contract-first.
 
-In NestJS, teams often define the same shape across DTOs, decorators, validators, Swagger metadata, and generated clients.
-
-With `@ebarahona/loopback-contracts`, the shape starts as JSON Schema and the framework artifacts are projected from it.
-
-This is useful when the contract needs to outlive one service or one framework layer.
+Instead of wiring DTOs, decorators, validators, and generated types separately, contracts become the foundation of the system.
 
 ---
 
-## Current package format
+# Current package format
 
 The package currently ships as CommonJS.
 
@@ -877,48 +825,36 @@ The package currently ships as CommonJS.
 }
 ```
 
-ESM compatibility can still matter for future output targets and downstream projects, but this package is not currently ESM-native.
-
 ---
 
-## Security notes
+# Security notes
 
-Remote schema sources and project-local emitters should be treated as codegen inputs.
+Remote schema sources and local emitters should be treated as codegen inputs.
 
-Review the security docs for production and CI usage, especially when using:
-
-- remote HTTPS schemas
-- git-based schema sources
-- npm-based schema sources
-- project-local manifest emitters
-- emitter sandbox settings
-- SSRF guards
-- host allowlists
-
-See:
+Review:
 
 ```txt
 docs/security.md
 ```
 
+Especially when using:
+- remote HTTPS schemas
+- git-based schemas
+- npm schema sources
+- local emitters
+
 ---
 
-## Recommended gitignore entries
-
-Generated metadata and cache directories should not be committed:
+# Recommended gitignore entries
 
 ```gitignore
 _meta/
 .loopback/cache/
 ```
 
-Generated `.base.*` files may be committed if the application expects generated source to live in the repo.
-
-Choose the policy that matches the team's workflow.
-
 ---
 
-## Documentation
+# Documentation
 
 - [CLI reference](./docs/cli.md)
 - [Architecture](./docs/architecture.md)
@@ -930,12 +866,11 @@ Choose the policy that matches the team's workflow.
 - [Roadmap](./ROADMAP.md)
 
 API reference:
-
 - [TypeDoc](https://ebarahona.github.io/loopback-contracts)
 
 ---
 
-## Development
+# Development
 
 Install dependencies:
 
@@ -979,7 +914,7 @@ Format:
 npm run format
 ```
 
-Run the local CLI:
+Run local CLI:
 
 ```bash
 npm run cli
@@ -993,50 +928,41 @@ npm run docs
 
 ---
 
-## Package scripts
+# Design principles
 
-| Script | Purpose |
-|---|---|
-| `npm run build` | compile TypeScript and copy templates |
-| `npm run clean` | remove `dist` |
-| `npm run lint` | run ESLint |
-| `npm run format` | run Prettier |
-| `npm test` | run Vitest |
-| `npm run test:unit` | run unit tests |
-| `npm run test:integration` | run integration tests |
-| `npm run docs` | generate TypeDoc |
-| `npm run cli` | run local CLI entrypoint |
-| `npm run bench` | run benchmarks |
+## Contracts are source of truth
+
+Framework code should derive from contracts.
 
 ---
 
-## Design principles
-
-### Contracts are source of truth
-
-Framework code should derive from contracts, not drift away from them.
-
-### Generated code must be safe to regenerate
+## Generated code must be safe to regenerate
 
 Machine-owned files use `.base.*`.
 
 User-owned files are scaffolded once.
 
-### Sidecars are opt-in
+---
+
+## Sidecars are opt-in
 
 Projects should only pay for the outputs they use.
 
-### Extension points should be real extension points
+---
 
-New emitters, validators, schema sources, and meta-schema contributors should be pluggable.
+## Extension points should be real extension points
 
-### LoopBack conventions matter
+Emitters, validators, schema sources, and meta-schema contributors should be pluggable.
+
+---
+
+## LoopBack conventions matter
 
 Generated output should feel native to LoopBack 4.
 
 ---
 
-## Roadmap
+# Roadmap
 
 See:
 
@@ -1044,35 +970,29 @@ See:
 ROADMAP.md
 ```
 
-Areas of ongoing work include:
-
+Areas being explored:
 - additional emitters
-- stronger manifest-backed emitter workflows
-- improved developer ergonomics
+- stronger manifest-backed workflows
 - richer examples
-- import workflows through the sibling import package
-- stricter CI validation patterns
+- improved DX
 - ESM compatibility exploration
 
 ---
 
-## Contributing
+# Contributing
 
 Contributions are welcome.
 
 Good areas to help:
-
-- examples
-- emitter improvements
 - docs
+- examples
+- emitters
 - tests
-- schema source resolvers
-- validator extensions
-- import workflows
-- developer experience
+- source resolvers
+- validators
+- DX improvements
 
 Read:
-
 - [CONTRIBUTING.md](./CONTRIBUTING.md)
 - [HELP_WANTED.md](./HELP_WANTED.md)
 - [STYLE_GUIDE.md](./STYLE_GUIDE.md)
@@ -1080,6 +1000,6 @@ Read:
 
 ---
 
-## License
+# License
 
 MIT
