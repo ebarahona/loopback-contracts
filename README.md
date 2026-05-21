@@ -5,6 +5,7 @@ Contract (JSON Schema-first) code generation and projection architecture for Loo
 `@ebarahona/loopback-contracts` turns JSON Schema contracts into OpenAPI 3.1 specifications, then projects those specifications into LoopBack 4 runtime artifacts such as models, repositories, controllers, datasources, and optional ecosystem sidecars.
 
 Optional sidecar emitters can also generate:
+
 - Zod validators
 - TypeScript types
 - GraphQL
@@ -74,6 +75,7 @@ Everything else is a projection.
 # What this project is
 
 `@ebarahona/loopback-contracts` is:
+
 - a JSON Schema-first code generation system
 - a projection pipeline
 - a LoopBack-oriented generator architecture
@@ -85,6 +87,7 @@ Everything else is a projection.
 # What this project is NOT
 
 `@ebarahona/loopback-contracts` is NOT:
+
 - a runtime transport framework
 - a Kafka framework
 - a Redis Streams framework
@@ -106,6 +109,7 @@ Some generated sidecars such as AsyncAPI or CloudEvents can describe message con
 LoopBack 4 was designed differently from most Node.js frameworks.
 
 Instead of focusing primarily on decorators and application structure, LoopBack 4 uses a highly composable backend architecture built around:
+
 - runtime dependency injection
 - extension points
 - dynamic discovery
@@ -116,6 +120,7 @@ Instead of focusing primarily on decorators and application structure, LoopBack 
 - pluggable framework primitives
 
 These capabilities make LoopBack 4 especially powerful for:
+
 - platform engineering
 - reusable backend systems
 - multi-service architectures
@@ -127,6 +132,7 @@ But many teams still spend significant time manually wiring repetitive framework
 `@ebarahona/loopback-contracts` preserves the architectural strengths and runtime flexibility of LoopBack 4 while dramatically reducing boilerplate through contract-first generation.
 
 Instead of manually maintaining:
+
 - models
 - repositories
 - controllers
@@ -143,6 +149,7 @@ Define the contract once and project the framework artifacts automatically.
 LoopBack 3 was fast.
 
 Many developers still miss:
+
 - rapid CRUD scaffolding
 - model-first workflows
   - model.json
@@ -151,6 +158,7 @@ Many developers still miss:
 - low-friction development
 
 `@ebarahona/loopback-contracts` aims to recover some of that productivity while preserving the architectural strengths of LoopBack 4:
+
 - TypeScript-first
 - Dependency Injection
 - OpenAPI-first APIs
@@ -168,6 +176,7 @@ But as systems grow, many NestJS applications become heavily centered around sta
 LoopBack 4 was designed differently.
 
 Its runtime architecture is built around:
+
 - dynamic dependency injection
 - extension points
 - runtime discovery
@@ -175,6 +184,7 @@ Its runtime architecture is built around:
 - transport-agnostic composition
 
 This makes LoopBack 4 especially powerful for:
+
 - platform engineering
 - reusable backend systems
 - internal frameworks
@@ -184,6 +194,7 @@ This makes LoopBack 4 especially powerful for:
 `@ebarahona/loopback-contracts` combines that runtime flexibility with a contract-first workflow.
 
 Define the contract once and project:
+
 - OpenAPI specifications
 - models
 - repositories
@@ -193,12 +204,12 @@ Define the contract once and project:
 - mobile/client contracts
 - edge runtime artifacts
 
-The contract becomes the source of truth for the entire platform.
----
+## The contract becomes the source of truth for the entire platform.
 
 # Features
 
 Core LoopBack outputs:
+
 - LoopBack 4 models
 - repositories
 - controllers
@@ -209,18 +220,18 @@ Core LoopBack outputs:
 
 Optional sidecar outputs:
 
-| Flag | Output |
-|---|---|
-| `--emit-zod` | Zod validators |
-| `--emit-types` | TypeScript interfaces |
-| `--emit-graphql` | GraphQL code-first decorators |
-| `--emit-graphql-sdl` | GraphQL SDL |
-| `--emit-cloudevents` | typed CloudEvents wrappers |
-| `--emit-asyncapi` | AsyncAPI fragments |
-| `--emit-proto` | Protocol Buffers schema |
-| `--emit-avro` | Avro schema |
-| `--emit-openapi-components` | OpenAPI components fragment |
-| `--emit-mock-data` | mock JSON fixtures |
+| Flag                        | Output                        |
+| --------------------------- | ----------------------------- |
+| `--emit-zod`                | Zod validators                |
+| `--emit-types`              | TypeScript interfaces         |
+| `--emit-graphql`            | GraphQL code-first decorators |
+| `--emit-graphql-sdl`        | GraphQL SDL                   |
+| `--emit-cloudevents`        | typed CloudEvents wrappers    |
+| `--emit-asyncapi`           | AsyncAPI fragments            |
+| `--emit-proto`              | Protocol Buffers schema       |
+| `--emit-avro`               | Avro schema                   |
+| `--emit-openapi-components` | OpenAPI components fragment   |
+| `--emit-mock-data`          | mock JSON fixtures            |
 
 ---
 
@@ -249,15 +260,15 @@ Node.js >= 20.19.0
 Sidecars are loaded lazily.
 Install only what we emit.
 
-| Sidecar | Install |
-|---|---|
-| Zod validators | `npm install zod json-schema-to-zod` |
+| Sidecar          | Install                                 |
+| ---------------- | --------------------------------------- |
+| Zod validators   | `npm install zod json-schema-to-zod`    |
 | TypeScript types | `npm install json-schema-to-typescript` |
-| GraphQL | `npm install quicktype-core` |
-| Protocol Buffers | `npm install quicktype-core` |
-| Avro | `npm install quicktype-core` |
-| CloudEvents | `npm install cloudevents` |
-| Mock data | `npm install json-schema-faker` |
+| GraphQL          | `npm install quicktype-core`            |
+| Protocol Buffers | `npm install quicktype-core`            |
+| Avro             | `npm install quicktype-core`            |
+| CloudEvents      | `npm install cloudevents`               |
+| Mock data        | `npm install json-schema-faker`         |
 
 If an emit flag is enabled without the required package installed, generation fails fast with the missing package name and install command.
 
@@ -382,6 +393,16 @@ src/
     index.ts
 ```
 
+The `.base.*` files are runnable as-is. They give you a 7-method CRUD controller, a `DefaultCrudRepository`, and a `@model` class with no TypeScript written by hand.
+
+For custom finders, route overrides, lifecycle hooks, or interceptors, scaffold a user-owned extension:
+
+```bash
+lb-contracts override controller order
+```
+
+This writes `src/controllers/order.controller.ts`, which is user-owned and never regenerated. See [Overrides](#overrides) below for the full set.
+
 Enable sidecars:
 
 ```bash
@@ -404,14 +425,14 @@ src/
 
 The generator separates machine-owned files from user-owned files.
 
-| File type | Rule |
-|---|---|
-| `.base.*` files | regenerated on every generation |
-| override files | scaffolded once |
-| `_meta/` files | regenerated |
-| `.loopback/cache/` | generated cache |
-| `schemas/` | authored by the user |
-| `configs/` | authored by the user |
+| File type          | Rule                            |
+| ------------------ | ------------------------------- |
+| `.base.*` files    | regenerated on every generation |
+| override files     | scaffolded once                 |
+| `_meta/` files     | regenerated                     |
+| `.loopback/cache/` | generated cache                 |
+| `schemas/`         | authored by the user            |
+| `configs/`         | authored by the user            |
 
 Do not edit `.base.*` files directly.
 
@@ -488,6 +509,7 @@ loopback.config.json
 ```
 
 Configures:
+
 - schema directories
 - remote schema sources
 - sidecar defaults
@@ -538,6 +560,7 @@ lb-contracts override controller order
 Runs the full generation pipeline.
 
 Generates:
+
 - `_meta/*.schema.json`
 - `.base.*` files
 - sidecars
@@ -601,12 +624,12 @@ Example:
 
 Supported schema sources:
 
-| Source | Example |
-|---|---|
-| local directory | `./schemas/` |
-| npm package | `npm:@my-org/contracts@^1.2.0` |
-| git+https | `git+https://github.com/my-org/contracts.git#v1.2.0` |
-| https | `https://example.com/contracts/order.schema.json` |
+| Source          | Example                                              |
+| --------------- | ---------------------------------------------------- |
+| local directory | `./schemas/`                                         |
+| npm package     | `npm:@my-org/contracts@^1.2.0`                       |
+| git+https       | `git+https://github.com/my-org/contracts.git#v1.2.0` |
+| https           | `https://example.com/contracts/order.schema.json`    |
 
 Remote schemas are cached under:
 
@@ -633,14 +656,14 @@ Generation follows a deterministic pipeline:
 
 # Extension points
 
-| Tag | Purpose |
-|---|---|
-| `EMITTER_TAG` | add projection emitters |
-| `SOURCE_TAG` | add schema source resolvers |
-| `SOURCE_EXTENSION_TAG` | contribute import-source wizard entries |
-| `EXTENSION_KEYWORD_TAG` | custom `x-*` keywords |
+| Tag                           | Purpose                                  |
+| ----------------------------- | ---------------------------------------- |
+| `EMITTER_TAG`                 | add projection emitters                  |
+| `SOURCE_TAG`                  | add schema source resolvers              |
+| `SOURCE_EXTENSION_TAG`        | contribute import-source wizard entries  |
+| `EXTENSION_KEYWORD_TAG`       | custom `x-*` keywords                    |
 | `META_SCHEMA_CONTRIBUTOR_TAG` | contribute generated meta-schema options |
-| `VALIDATOR_TAG` | add Ajv formats or keywords |
+| `VALIDATOR_TAG`               | add Ajv formats or keywords              |
 
 ---
 
@@ -649,6 +672,7 @@ Generation follows a deterministic pipeline:
 Emitters transform contracts into generated outputs.
 
 Built-in emitters include:
+
 - LoopBack model
 - repository
 - controller
@@ -670,6 +694,7 @@ Built-in emitters include:
 Use when generation requires real translation logic.
 
 Examples:
+
 - GraphQL
 - Protocol Buffers
 - Avro
@@ -690,6 +715,7 @@ emitters/
 ```
 
 Useful for:
+
 - local project emitters
 - custom wrappers
 - organization-specific templates
@@ -702,6 +728,7 @@ Useful for:
 JSON Schema is more expressive than many target formats.
 
 Examples:
+
 - unions may not map perfectly to GraphQL
 - validation keywords may not map cleanly to Protocol Buffers
 
@@ -732,6 +759,7 @@ Import workflows belong in the sibling package:
 ```
 
 Potential import sources:
+
 - Zod
 - OpenAPI
 - WSDL
@@ -749,6 +777,7 @@ Imported schemas become standard JSON Schema contracts.
 OpenAPI Generator is excellent for generic clients and servers.
 
 `@ebarahona/loopback-contracts` focuses specifically on LoopBack 4 conventions:
+
 - `@model`
 - `@property`
 - repositories
@@ -768,6 +797,7 @@ The goal is to make LoopBack 4 contract-first development faster and safer.
 JSON Schema can describe data independently from a specific framework.
 
 From one schema we can project:
+
 - LoopBack models
 - OpenAPI
 - validators
@@ -782,6 +812,7 @@ This keeps framework code downstream from contracts.
 # LoopBack 4 fit
 
 LoopBack 4 already provides:
+
 - dependency injection
 - repositories
 - datasources
@@ -798,6 +829,7 @@ LoopBack 4 already provides:
 LoopBack 3 users often miss how quickly they could move from a model to a working API.
 
 This project aims to recover that speed while modernizing around:
+
 - TypeScript
 - OpenAPI
 - dependency injection
@@ -838,6 +870,7 @@ docs/security.md
 ```
 
 Especially when using:
+
 - remote HTTPS schemas
 - git-based schemas
 - npm schema sources
@@ -866,6 +899,7 @@ _meta/
 - [Roadmap](./ROADMAP.md)
 
 API reference:
+
 - [TypeDoc](https://ebarahona.github.io/loopback-contracts)
 
 ---
@@ -971,6 +1005,7 @@ ROADMAP.md
 ```
 
 Areas being explored:
+
 - additional emitters
 - stronger manifest-backed workflows
 - richer examples
@@ -984,6 +1019,7 @@ Areas being explored:
 Contributions are welcome.
 
 Good areas to help:
+
 - docs
 - examples
 - emitters
@@ -993,6 +1029,7 @@ Good areas to help:
 - DX improvements
 
 Read:
+
 - [CONTRIBUTING.md](./CONTRIBUTING.md)
 - [HELP_WANTED.md](./HELP_WANTED.md)
 - [STYLE_GUIDE.md](./STYLE_GUIDE.md)
