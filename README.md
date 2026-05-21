@@ -20,10 +20,16 @@ LoopBack 4 is the only Node framework with first-class runtime DI: extension poi
 
 ## The full picture
 
-You write JSON Schema:
+The wizard scaffolds both files for you. One command, one interactive session:
+
+```bash
+lb-contracts contract customer
+```
+
+It prompts for properties, the datasource binding, and the public/private flag, then writes both files together:
 
 ```jsonc
-// schemas/customer.schema.json, pure JSON Schema, portable to any tool
+// schemas/customer.schema.json (pure JSON Schema, portable to any tool)
 {
   "$id": "customer.v1",
   "type": "object",
@@ -35,7 +41,7 @@ You write JSON Schema:
   "required": ["id", "email", "name"]
 }
 
-// configs/customer.config.json, LoopBack-specific bindings
+// configs/customer.config.json (LoopBack-specific bindings)
 {
   "$contractId": "customer.v1",
   "dataSource": "primary",
@@ -44,7 +50,9 @@ You write JSON Schema:
 }
 ```
 
-Run `lb-contracts gen`:
+Edit either file in your editor whenever you want. The `$schema` pointer at the top of every authored JSON file resolves to a meta-schema the engine regenerates, so VS Code gives you autocomplete, inline validation, and hover docs for every valid datasource, contract id, relation kind, and ACL shape.
+
+Then run `lb-contracts gen`:
 
 ```
 src/models/customer.base.model.ts            @model class, DI-bound
