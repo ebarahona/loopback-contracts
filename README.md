@@ -18,7 +18,7 @@ Contract-first inverts that. The JSON Schema **is** the truth. Models, repositor
 
 LoopBack 4 is the only Node framework with first-class runtime DI: extension points, lifecycle observers, context-based dependency resolution, hot-swappable bindings. This plugin treats the generated `@model`, `@repository`, `@controller`, and datasource classes as DI citizens from day one. Swap a datasource at runtime without regenerating. Decorate a controller with extra interceptors. The contracts you author and the bindings you wire stay independent forever.
 
-## The full picture
+## Try it
 
 The wizard scaffolds both files for you. One command, one interactive session:
 
