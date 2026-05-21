@@ -4,7 +4,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/ebarahona/loopback-contracts/ci.yml?branch=main&label=ci)](https://github.com/ebarahona/loopback-contracts/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/npm/l/@ebarahona/loopback-contracts.svg)](./LICENSE)
 
-**Contract-first development for LoopBack 4.** Define your data with JSON Schema. The plugin generates the models, repositories, controllers, and datasources, all wired into LoopBack 4's runtime dependency injection container, the only framework-level IoC system in the Node ecosystem.
+**Contract-first development for LoopBack 4.** JSON Schema is the source of truth. Point at a local directory, fetch from npm / git / HTTPS, or let the CLI wizard build the schema from an interactive prompt. Once the schema lands, the engine generates the LoopBack 4 models, repositories, controllers, and datasources, plus the OpenAPI document your app serves at runtime, all wired into LoopBack 4's runtime dependency injection container, the only framework-level IoC system in the Node ecosystem.
 
 ```bash
 npm install @ebarahona/loopback-contracts
@@ -20,13 +20,40 @@ LoopBack 4 is the only Node framework with first-class runtime DI: extension poi
 
 ## Try it
 
-The wizard scaffolds both files for you. One command, one interactive session:
+The pipeline is the same every time: **JSON Schema -> OpenAPI spec -> generated files**. What changes is where the schema comes from. Three entry points, one destination.
+
+### 1. Local schemas
+
+Already have JSON Schema files? Point `loopback.config.json` at the directory:
+
+```jsonc
+// loopback.config.json
+{"schemas": ["./schemas"]}
+```
+
+### 2. Remote schemas
+
+Pull from npm, git, or HTTPS. The engine fetches on every run, validates, and pins:
+
+```jsonc
+{
+  "schemas": [
+    "npm:@acme/contracts",
+    "git+https://github.com/acme/contracts#v2",
+    "https://schemas.acme.com/v1/",
+  ],
+}
+```
+
+### 3. CLI wizard
+
+No schema yet? Describe the model and the wizard writes the JSON Schema for you:
 
 ```bash
 lb-contracts contract customer
 ```
 
-It prompts for properties, the datasource binding, and the public/private flag, then writes both files together:
+One interactive session asks for properties, the datasource binding, and the public/private flag, then writes both files together:
 
 ```jsonc
 // schemas/customer.schema.json (pure JSON Schema, portable to any tool)
@@ -50,9 +77,17 @@ It prompts for properties, the datasource binding, and the public/private flag, 
 }
 ```
 
-Edit either file in your editor whenever you want. The `$schema` pointer at the top of every authored JSON file resolves to a meta-schema the engine regenerates, so VS Code gives you autocomplete, inline validation, and hover docs for every valid datasource, contract id, relation kind, and ACL shape.
+Edit either file in your editor afterwards. The `$schema` pointer at the top of every authored JSON file resolves to a meta-schema the engine regenerates, so VS Code gives you autocomplete, inline validation, and hover docs for every valid datasource, contract id, relation kind, and ACL shape.
 
-Then run `lb-contracts gen`:
+### The pipeline
+
+Whichever entry point you pick, `lb-contracts gen` runs the same chain:
+
+```
+JSON Schema  -->  OpenAPI 3.1 spec  -->  LoopBack 4 files
+```
+
+Output on disk:
 
 ```
 src/models/customer.base.model.ts            @model class, DI-bound
@@ -61,7 +96,7 @@ src/controllers/customer.base.controller.ts  REST controller, 7-method CRUD, DI-
 src/datasources/primary.base.datasource.ts   juggler datasource, DI-bound
 ```
 
-Plus user-editable extension files (`customer.model.ts`, `customer.repository.ts`, etc.) where your custom finders, route overrides, and lifecycle hooks live. The `.base.` files regenerate on every change; your extensions are written once and never overwritten. LoopBack 4's DI container handles the wiring.
+Plus user-editable extension files (`customer.model.ts`, `customer.repository.ts`, etc.) for your custom finders, route overrides, and lifecycle hooks. The `.base.` files regenerate on every change; your extensions are written once and never overwritten. LoopBack 4's DI container handles the wiring. The OpenAPI spec is served live at `GET /openapi.json` so your generated REST surface and your contract never drift.
 
 ## Nine formats from one schema
 
