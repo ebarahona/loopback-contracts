@@ -9,7 +9,7 @@ contributor is using.
 
 `@ebarahona/loopback-contracts` is a JSON Schema-driven contract
 substrate for LoopBack 4. The user authors `schemas/*.schema.json` (pure
-JSON Schema 2020-12) and `configs/*.config.json` (LB-isms — datasource,
+JSON Schema 2020-12) and `configs/*.config.json` (LB-isms, datasource,
 relations, ACLs, hidden fields); the engine emits LB4
 `@model` / `@repository` / `@controller` / `@lifeCycleObserver`
 datasource classes plus nine opt-in sidecar formats (Zod, pure TS
@@ -45,7 +45,7 @@ Read these in full before suggesting any change.
   auto-integration with the CLI and meta-schemas, engine-vs-emitter
   split, versioning policy.
 - LoopBack's official [`loopback-core` skill](https://github.com/loopbackio/loopback-next/tree/master/skills/loopback-core)
-  — upstream reference for IoC, dependency injection, extension points,
+  , upstream reference for IoC, dependency injection, extension points,
   interceptors, lifecycle observers, and components. Defer to this for
   framework patterns; STYLE_GUIDE.md only documents plugin-author
   conventions layered on top.
@@ -54,7 +54,7 @@ Read these in full before suggesting any change.
 
 1. Every commit uses Conventional Commits. Allowed types: `feat`,
    `fix`, `docs`, `chore`, `ci`, `build`, `deps`, `perf`, `refactor`,
-   `revert`, `style`, `test`. release-please derives `CHANGELOG.md` and
+   `revert`, `style`, `test`, release-please derives `CHANGELOG.md` and
    the version bump from these. Incorrect types silently break the
    release.
 2. Every commit carries a DCO sign-off (`git commit -s`). PRs without
@@ -90,7 +90,7 @@ them silently destroys user-authored content.
   user's editor, never through the CLI.
 - Generated base files (`src/**/*.base.*.ts`) are **regen-always**. The
   engine overwrites them on every run. Never hand-edit a `.base.` file
-  — the next `lb4 gen` deletes the change. Hand-editing belongs in the
+  , the next `lb4 gen` deletes the change. Hand-editing belongs in the
   extension file (no `.base.` suffix).
 - Extension files (`src/**/*.{model,repository,controller,datasource}.ts`,
   without `.base.`) are **scaffold-once via `lb4 override`**, then owned
@@ -107,8 +107,8 @@ them silently destroys user-authored content.
 - Six extension-point tags are stable at v1.0. Plugins self-register
   under the appropriate tag and the engine resolves them at boot:
   `EMITTER_TAG` (projection emitters), `SOURCE_TAG` (schema-source
-  resolvers — `local`, `npm:`, `git+https`, `https`),
-  `SOURCE_EXTENSION_TAG` (additional source kinds — `s3://`, `oci://`,
+  resolvers. `local`, `npm:`, `git+https`, `https`),
+  `SOURCE_EXTENSION_TAG` (additional source kinds. `s3://`, `oci://`,
   etc.), `EXTENSION_KEYWORD_TAG` (`x-*` keyword handlers),
   `META_SCHEMA_CONTRIBUTOR_TAG` (per-emitter enum contributions to the
   generated `_meta/*.schema.json`), `VALIDATOR_TAG` (additional Ajv

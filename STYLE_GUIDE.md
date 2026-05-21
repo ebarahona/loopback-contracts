@@ -35,7 +35,7 @@ mongo.datasource.provider.ts
 Why:
 
 - The LoopBack CLI scaffolds files in this format; tooling, generators, and migrations expect it.
-- The artifact suffix (`.controller`, `.service`) is a typed-grep affordance — `rg --files -g '*.repository.ts'` enumerates all repositories in a workspace.
+- The artifact suffix (`.controller`, `.service`) is a typed-grep affordance. `rg --files -g '*.repository.ts'` enumerates all repositories in a workspace.
 - Ecosystem consistency: every published `@loopback/*` package follows it.
 
 Implementation files for an interface use a `.impl.ts` suffix in the same directory as the interface:
@@ -110,7 +110,7 @@ Rules:
 - Binding key strings mirror domain ownership. Use dot-namespaced lowercase: `auth.token-service`, `mongo.connection-manager`, `datasources.mongo`. The first segment is the plugin's domain and must not collide with `@loopback/*` reserved namespaces (`controllers.*`, `datasources.*` for the framework-owned slot, `services.*`).
 - Use `import type` for the value type. This breaks the runtime cycle that otherwise forms between `keys.ts` and the implementation it names. Why: `keys.ts` is imported by every file in the plugin; if it pulls in runtime modules, every consumer drags the whole graph.
 - One namespace per plugin. Do not split keys across multiple files.
-- Never export raw string literals — only `BindingKey` instances.
+- Never export raw string literals, only `BindingKey` instances.
 
 When binding into a framework slot (e.g. `datasources.mongo`), use the framework's prefix, not your plugin's.
 
@@ -142,7 +142,7 @@ export class MongoDataSourceProvider implements Provider<juggler.DataSource> {
 
 Rules:
 
-- Providers are stateless except for injected dependencies. No mutable instance state, no caching inside the provider — caching is the job of the binding scope (`SINGLETON`).
+- Providers are stateless except for injected dependencies. No mutable instance state, no caching inside the provider, caching is the job of the binding scope (`SINGLETON`).
 - `value()` is synchronous when possible. Use `async value()` only when the bound value genuinely requires async construction.
 - One provider per file. Name matches the binding it serves with a `Provider` suffix: `MongoDataSourceProvider` provides `MongoBindings.DATASOURCE`.
 - Providers live in the folder of the artifact they construct (`datasources/` for a datasource provider), or in `providers/` if they cross artifact boundaries.
@@ -182,7 +182,7 @@ Rules:
 
 ## 7. Lifecycle observers
 
-Anything that opens I/O — database connections, message queues, file watchers, websockets, scheduled timers — runs behind a `@lifeCycleObserver` class:
+Anything that opens I/O, database connections, message queues, file watchers, websockets, scheduled timers, runs behind a `@lifeCycleObserver` class:
 
 ```typescript
 @lifeCycleObserver('mongodb')
@@ -212,7 +212,7 @@ Rules:
 
 ## 8. Shared resource ownership
 
-A plugin that constructs an artifact against a shared resource — a connection manager, an HTTP client pool, an open file — must track whether it owns the resource and skip cleanup when it does not:
+A plugin that constructs an artifact against a shared resource, a connection manager, an HTTP client pool, an open file, must track whether it owns the resource and skip cleanup when it does not:
 
 ```typescript
 export class MongoConnector {
@@ -283,7 +283,7 @@ Rules:
 - `@public`: a semver commitment. Breaking changes require a major version bump and CHANGELOG entry.
 - `@experimental`: shipped, documented, but the signature may break in a minor. Default tag for newly added exports.
 - `@internal`: not part of the package's API surface. Excluded from generated docs. Consumers reaching for it accept breakage at any time.
-- A symbol with no tag is treated as `@internal` by tooling but must not exist in code review — every export carries a tag.
+- A symbol with no tag is treated as `@internal` by tooling but must not exist in code review, every export carries a tag.
 - API Extractor (or equivalent) is the source of truth for what's in the public surface; tags drive its report. CI fails if the report drifts without an accompanying version bump.
 
 ## 10. Peer dependencies
@@ -323,7 +323,7 @@ src/
 Rules:
 
 - `unit/`: pure logic. No I/O, no timers, no globals. Each file targets one source module.
-- `integration/`: anything that touches I/O. Uses a real backing service — `mongodb-memory-server`, `pg-mem`, ephemeral Docker containers, in-memory queues with the real client. Never mocks of the driver itself. Why: driver mocks encode the test author's assumptions about the driver, not the driver's actual behavior; the bugs that matter live in that gap.
+- `integration/`: anything that touches I/O. Uses a real backing service. `mongodb-memory-server`, `pg-mem`, ephemeral Docker containers, in-memory queues with the real client. Never mocks of the driver itself. Why: driver mocks encode the test author's assumptions about the driver, not the driver's actual behavior; the bugs that matter live in that gap.
 - Recommended runner: Vitest. The `vitest.config.ts` for integration must pin `singleThread: true`:
 
 ```typescript
@@ -378,7 +378,7 @@ Rules:
 - Cross-link binding keys with backtick names: `` `MongoBindings.CONFIG` ``. Do not hyperlink them.
 - Never use HTML tags inside JSDoc. No `<br>`, `<p>`, `<code>`. Use Markdown paragraphs and backticks.
 - Sentences end with periods. Imperative mood for behavior descriptions ("Connect to MongoDB.", not "Connects to MongoDB.").
-- No `@author`, `@version`, `@since` — release-please owns versions and authorship lives in git.
+- No `@author`, `@version`, `@since`, release-please owns versions and authorship lives in git.
 - Internal helpers (non-exported) get a one-line JSDoc only if their name is not self-explanatory.
 
 ## 13. Error handling
@@ -396,7 +396,7 @@ export class MongoConfigError extends Error {
 
 Rules:
 
-- Error class name is `<Domain><Kind>Error` — `MongoConfigError`, `AuthTokenError`, `RedisConnectionError`. The `name` field is set to match the class name with `override readonly`.
+- Error class name is `<Domain><Kind>Error`. `MongoConfigError`, `AuthTokenError`, `RedisConnectionError`. The `name` field is set to match the class name with `override readonly`.
 - One error class per failure category, not one per call site. A `MongoConfigError` covers every config-validation failure.
 - Error messages are user-readable and actionable. They name the offending field and suggest the fix.
 - Never leak credentials. Redact at the boundary that constructs the message, not at the log sink:
@@ -408,10 +408,10 @@ throw new MongoConfigError(
 );
 ```
 
-- Driver-originated errors pass through unchanged. Do not wrap them — wrapping hides the driver's error code, which consumers match on.
+- Driver-originated errors pass through unchanged. Do not wrap them, wrapping hides the driver's error code, which consumers match on.
 - `try` / `catch` only when adding context or recovering. Naked `catch (err) { throw err; }` is forbidden.
 - Async functions throw; they do not return `{error, result}` tuples.
-- **Retry only what is worth retrying.** DO retry: transient network errors, timeouts, HTTP 429, and 5xx server errors. DO NOT retry: 4xx client errors — those indicate a bug or invalid input, and retrying masks the root cause and wastes time. Surface 4xx to the caller immediately.
+- **Retry only what is worth retrying.** DO retry: transient network errors, timeouts, HTTP 429, and 5xx server errors. DO NOT retry: 4xx client errors, those indicate a bug or invalid input, and retrying masks the root cause and wastes time. Surface 4xx to the caller immediately.
 - **Cleanup is wrapped in its own `try` / `catch`** so a failure during teardown does not mask the original error. The original error always wins:
 
 ```typescript
@@ -430,7 +430,7 @@ try {
 
 ## 14. Config validation
 
-Plugins validate config at the framework boundary — at component bind time or at the first lifecycle entry — not deep inside a driver call. The driver's errors are good for driver-shape issues (auth, TLS, server reachability); they are terrible for "you forgot to set the url".
+Plugins validate config at the framework boundary, at component bind time or at the first lifecycle entry, not deep inside a driver call. The driver's errors are good for driver-shape issues (auth, TLS, server reachability); they are terrible for "you forgot to set the url".
 
 ```typescript
 export function validateConfig(config: MongoConnectorConfig | undefined): void {
@@ -462,7 +462,7 @@ Rules:
 Adopt Google's TypeScript type rules. The LoopBack-specific points:
 
 - No `any`. Use `unknown` for genuinely opaque values and narrow at the boundary. Why: LoopBack's juggler layer is loosely typed; `any` lets that looseness leak through every layer of your plugin.
-- `as` casts only. No `<T>` cast syntax — collides with JSX and reads worse in arrow generics.
+- `as` casts only. No `<T>` cast syntax, collides with JSX and reads worse in arrow generics.
 - Prefer `?` optional fields over `field: T | undefined` unions in interfaces. Use the union form only when the field is required-but-nullable.
 - `import type { Foo }` for every type-only import. This is enforced by `verbatimModuleSyntax`. It matters more than usual because `keys.ts` is at the center of the import graph; runtime imports there create cycles.
 - `readonly` on every field that is set in the constructor and never reassigned. `readonly` on every array/object property exposed publicly.
@@ -484,18 +484,18 @@ Why: the framework's typed surface is the contract; everything outside it can ch
 
 Conventional Commits. Allowed types:
 
-- `feat` — user-visible feature.
-- `fix` — bug fix.
-- `docs` — documentation only.
-- `chore` — repo plumbing.
-- `ci` — CI configuration.
-- `build` — build system, packaging.
-- `deps` — dependency bumps.
-- `perf` — performance, no behavior change.
-- `refactor` — refactor with no behavior change.
-- `revert` — revert of an earlier commit.
-- `style` — formatting only.
-- `test` — tests only.
+- `feat`, user-visible feature.
+- `fix`, bug fix.
+- `docs`, documentation only.
+- `chore`, repo plumbing.
+- `ci`. CI configuration.
+- `build`, build system, packaging.
+- `deps`, dependency bumps.
+- `perf`, performance, no behavior change.
+- `refactor`, refactor with no behavior change.
+- `revert`, revert of an earlier commit.
+- `style`, formatting only.
+- `test`, tests only.
 
 Format:
 

@@ -5,7 +5,7 @@ at v1.0. Several extension surfaces are deliberately left open for the
 community: additional emitters, additional schema-source resolvers,
 larger fixture corpora, and manifest-emitter templates for org-internal
 envelope formats. Contributions on any of these grow the value of the
-plugin without requiring engine changes — the architecture explicitly
+plugin without requiring engine changes, the architecture explicitly
 makes that possible.
 
 ## New emitter for a not-yet-covered format
@@ -101,7 +101,7 @@ simple shapes. Contributions that broaden coverage:
 Directory: `src/__tests__/fixtures/manifest-emitters/`
 
 The manifest+template contribution path lets project authors ship a
-new emitter as one JSON manifest plus one EJS template — no TS, no
+new emitter as one JSON manifest plus one EJS template, no TS, no
 npm publish. Reference templates that cover common org-internal needs:
 
 - **Audit-log envelope**: wrap every event with `{actor, occurred_at,

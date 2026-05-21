@@ -107,7 +107,7 @@ Releases are automated by [release-please](https://github.com/googleapis/release
 
 ### Local `npm pack` / `npm publish` notes
 
-Both commands run the `prepare` script as part of npm's lifecycle. The local hook installer (`scripts/install-hooks.sh`) detects `npm_command=pack` / `npm_command=publish` (and `--dry-run`) and skips silently in that context — no dev-onboarding nudge during a publish.
+Both commands run the `prepare` script as part of npm's lifecycle. The local hook installer (`scripts/install-hooks.sh`) detects `npm_command=pack` / `npm_command=publish` (and `--dry-run`) and skips silently in that context, no dev-onboarding nudge during a publish.
 
 If `npm pack --dry-run` errors with `EACCES` against `~/.npm` (a stale-permission case from a previous `sudo npm install`), use a per-invocation cache instead of touching your global cache directory:
 
@@ -117,7 +117,7 @@ npm --cache /tmp/loopback-contracts-npm-cache pack --dry-run
 npm --cache /tmp/loopback-contracts-npm-cache publish
 ```
 
-The repo does NOT ship an `.npmrc` overriding the cache — that would inflict a project-local cache on every contributor regardless of their setup. The `--cache` flag is the cleanest one-shot override that doesn't touch any global config.
+The repo does NOT ship an `.npmrc` overriding the cache, that would inflict a project-local cache on every contributor regardless of their setup. The `--cache` flag is the cleanest one-shot override that doesn't touch any global config.
 
 ## Branch protection (maintainer one-time setup)
 
