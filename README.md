@@ -4,21 +4,66 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/ebarahona/loopback-contracts/ci.yml?branch=main&label=ci)](https://github.com/ebarahona/loopback-contracts/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/npm/l/@ebarahona/loopback-contracts.svg)](./LICENSE)
 
-JSON Schema-driven contract substrate for LoopBack 4. The user authors pure JSON Schema 2020-12 (no vendor extensions) plus a sibling LB-isms config; the engine emits idiomatic LB4 `@model` / `@repository` / `@controller` / datasource classes plus nine opt-in sidecar projections. Six extension-point tags keep the engine and the emitters strictly separated; new formats and new schema sources arrive as plugins without engine changes.
+**Write JSON Schema, get a working LoopBack 4 app.** This is the LoopBack 3 "models/\*.json" workflow that LB4 dropped — reborn on a real open standard. Describe your data once in JSON Schema 2020-12; `lb-contracts gen` writes every `@model`, `@repository`, `@controller`, and datasource class for you, plus optional Zod, GraphQL, AsyncAPI, Protocol Buffers, Avro, OpenAPI, CloudEvents, and mock-data sidecars.
 
 ```bash
 npm install @ebarahona/loopback-contracts
 ```
 
-> Part of the [`@ebarahona/loopback-*` plugin portfolio](https://github.com/ebarahona/loopback-plugins). The sibling [`@ebarahona/loopback-contracts-import`](https://github.com/ebarahona/loopback-contracts-import) covers the inverse direction (Zod / OpenAPI / WSDL / Avro / proto / GraphQL SDL / AsyncAPI / live database → `schemas/*.schema.json`); the two plugins are mirror operations on either side of the canonical schema substrate.
+### Why this exists
 
-## Why this exists
+LoopBack 3 let you describe a domain in JSON and get a working server. LoopBack 4 made you write TypeScript decorators by hand for every model, repository, and controller. A lot of LB3 shops never made the jump for exactly that reason.
 
-LoopBack 4 traded LoopBack 3's JSON-driven authoring ergonomics for a TypeScript-first surface. A significant population of LB3 shops never migrated for that exact reason. `loopback-contracts` restores the LB3 workflow — but expressed in **JSON Schema 2020-12** instead of LB3's bespoke `models/*.json` DSL, with all the editor support, validation tooling, and cross-language portability that brings.
+This brings the JSON-first workflow back — but on **JSON Schema 2020-12**, the real open standard, not LB3's bespoke `models/*.json` DSL. Every editor already speaks JSON Schema. Every validator understands it. Every other language has tooling for it. Your contracts stop being LoopBack-specific and start being portable.
 
-Every LB3 muscle-memory action has a 1:1 successor. Every JSON file is standards-validated. The TypeScript surface is generated. LB4's type system and DI container work as advertised because the codegen emits idiomatic LB4 code.
+### What you write vs. what you get
 
-The full architectural rationale lives in [`loopback-contracts.md`](https://github.com/ebarahona/loopback-plugins/blob/main/docs/loopback-contracts.md); the extensibility architecture lives in [`contracts-extensibility.md`](https://github.com/ebarahona/loopback-plugins/blob/main/docs/contracts-extensibility.md). This README is the operating manual.
+You author two small JSON files per model:
+
+```jsonc
+// schemas/customer.schema.json — pure JSON Schema, portable to any tool
+{
+  "$id": "customer.v1",
+  "type": "object",
+  "properties": {
+    "id":    {"type": "string"},
+    "email": {"type": "string", "format": "email"},
+    "name":  {"type": "string"}
+  },
+  "required": ["id", "email", "name"]
+}
+
+// configs/customer.config.json — the LB4-isms (datasource binding, ACLs, relations)
+{
+  "$contractId": "customer.v1",
+  "dataSource": "primary",
+  "public": true,
+  "model": {"base": "Entity", "strict": true, "idProperty": "id"}
+}
+```
+
+`lb-contracts gen` produces every TypeScript file your LB4 app actually needs:
+
+```
+src/models/customer.base.model.ts            # the @model class
+src/repositories/customer.base.repository.ts # DefaultCrudRepository
+src/controllers/customer.base.controller.ts  # REST controller (7-method CRUD)
+src/datasources/primary.base.datasource.ts   # juggler datasource
+```
+
+The `.base.` files regenerate on every `lb-contracts gen` — that's the contract. Sibling extension stubs (`<name>.model.ts`, `<name>.repository.ts`, etc.) are written once and never overwritten, so any hand-customisation you add survives every regeneration. LB4's DI container, type system, and decorators all work as advertised because the generated code is exactly what an LB4 dev would have written by hand.
+
+Enable sidecar projections via `--emit-<kind>` flags (or `loopback.config.json#/emit`):
+
+```bash
+lb-contracts gen --emit-zod --emit-graphql --emit-asyncapi
+```
+
+…and you get `customer.zod.ts`, `customer.graphql.ts`, `customer.asyncapi.yaml` alongside the LB4 classes — the same `customer.v1` schema projected into every shape your stack consumes.
+
+> Sibling project: [`@ebarahona/loopback-contracts-import`](https://github.com/ebarahona/loopback-contracts-import) covers the inverse direction — Zod / OpenAPI / WSDL / Avro / proto / GraphQL SDL / AsyncAPI / live database → `schemas/*.schema.json`. The two plugins are mirror operations on either side of the canonical schema substrate.
+
+Full architectural rationale: [`loopback-contracts.md`](https://github.com/ebarahona/loopback-plugins/blob/main/docs/loopback-contracts.md). Extensibility architecture: [`contracts-extensibility.md`](https://github.com/ebarahona/loopback-plugins/blob/main/docs/contracts-extensibility.md). The rest of this README is the operating manual.
 
 ## Installation
 
