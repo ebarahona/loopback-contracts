@@ -52,6 +52,16 @@ Runs the engine end-to-end against the fixture project under `src/__tests__/fixt
 
 Integration tests run the engine end-to-end: source-resolver fetch, schema validation, meta-schema generation, all enabled emitters, file writer, and a final `tsc` of the produced bases.
 
+Integration tests run the built CLI, so run `npm run build` before `npm test`.
+
+One integration test (`src/__tests__/integration/mongodb-emitter.spec.ts`, "MongoDB validator in mongo:7") loads the generated `$jsonSchema` validator into a real MongoDB started with `docker run mongo:7`. It needs a reachable Docker daemon and is skipped (reported as skipped, not failed) when `docker version` cannot reach a server. The `docker` CLI uses its current context; to point the test at a different daemon, set the context for the one command, for example Docker Desktop on macOS:
+
+```bash
+DOCKER_CONTEXT=desktop-linux npm test
+```
+
+`DOCKER_HOST=unix:///path/to/docker.sock npm test` works the same way. Neither changes your global Docker configuration.
+
 ## Commit message format
 
 ```

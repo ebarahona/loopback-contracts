@@ -264,6 +264,104 @@ describe('Pipeline stage gates', () => {
     }
   });
 
+  describe('stage 4 with plain $ids', () => {
+    const MONEY = {
+      $id: 'money',
+      type: 'object',
+      properties: {amount: {$ref: '#/$defs/amount'}},
+      $defs: {amount: {type: 'number', minimum: 0}},
+    };
+
+    async function runStage4(
+      name: string,
+      intake: Record<string, unknown>,
+    ): Promise<void> {
+      const root = makeProject(name);
+      writeFileSync(
+        join(root, 'schemas', 'money.schema.json'),
+        JSON.stringify(MONEY),
+        'utf8',
+      );
+      writeFileSync(
+        join(root, 'schemas', 'appraisal-intake.schema.json'),
+        JSON.stringify({$id: 'appraisal-intake', type: 'object', ...intake}),
+        'utf8',
+      );
+      const config = defaultConfig({schemas: [join(root, 'schemas')]});
+      const app = await bootstrap(root, config);
+      try {
+        const pipeline = await app.get<Pipeline>(
+          ContractsEngineBindings.PIPELINE,
+        );
+        await pipeline.run({
+          projectRoot: root,
+          config,
+          emitFlags: {},
+          validateOnly: true,
+          maxStage: 4,
+        });
+      } finally {
+        await app.stop();
+      }
+    }
+
+    it('resolves local pointers, plain-id refs and plain-id fragments', async () => {
+      await expect(
+        runStage4('stage4-plain-ok', {
+          properties: {
+            price: {$ref: 'money'},
+            amount: {$ref: 'money#/$defs/amount'},
+            note: {$ref: '#/$defs/note'},
+          },
+          $defs: {note: {type: 'string'}},
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('rejects a dangling local pointer with a clear error', async () => {
+      await expect(
+        runStage4('stage4-plain-local-dangling', {
+          properties: {note: {$ref: '#/$defs/missing'}},
+        }),
+      ).rejects.toThrow(
+        /dangling `\$ref` '#\/\$defs\/missing'.*'appraisal-intake' has no '#\/\$defs\/missing'/,
+      );
+    });
+
+    it('rejects a dangling cross-schema pointer and an unknown plain id', async () => {
+      await expect(
+        runStage4('stage4-plain-cross-dangling', {
+          properties: {amount: {$ref: 'money#/$defs/nope'}},
+        }),
+      ).rejects.toThrow(/'money' has no '#\/\$defs\/nope'/);
+      await expect(
+        runStage4('stage4-plain-unknown', {
+          properties: {amount: {$ref: 'currency'}},
+        }),
+      ).rejects.toThrow(/dangling `\$ref` 'currency'/);
+    });
+
+    it('ignores $ref-shaped instance data in enum, const, examples, default', async () => {
+      await expect(
+        runStage4('stage4-plain-data-keywords', {
+          properties: {
+            a: {enum: [{$ref: 'nope-a'}]},
+            b: {const: {$ref: 'nope-b'}},
+            c: {examples: [{$ref: 'nope-c'}], default: {$ref: 'nope-d'}},
+          },
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('checks refs under a property literally named $ref', async () => {
+      await expect(
+        runStage4('stage4-plain-ref-named-property', {
+          properties: {$ref: {$ref: 'currency'}},
+        }),
+      ).rejects.toThrow(/dangling `\$ref` 'currency'/);
+    });
+  });
+
   it('stage 5 fails when a config references an unknown datasource', async () => {
     const root = makeProject('stage5-unknown-ds');
     writeFileSync(
@@ -397,6 +495,5 @@ describe('Pipeline stage gates', () => {
     } finally {
       await app.stop();
     }
-  }, // `npx tsc` cold start dominates wall time — match the e2e gate test.
-  120_000);
+  }, 120_000); // `npx tsc` cold start dominates wall time — match the e2e gate test.
 });

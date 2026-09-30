@@ -422,7 +422,7 @@ function buildRelations(
     // Pin to the sibling base-model file deterministically; importMap.resolve
     // can return the extension path, but base files must only import base
     // siblings (extensions are `skipIfExists` and may not exist on first gen).
-    const targetImport = `../models/${toKebab(targetClass)}.base.model`;
+    const targetImport = `./${toKebab(targetClass)}.base.model`;
     imports.push({
       specifier: targetImport,
       names: [targetBaseClass, `${targetBaseClass}WithRelations`],
@@ -442,7 +442,7 @@ function buildRelations(
       } else {
         const throughClass = classNameFromId(throughSchema.$id);
         throughBaseClass = `${throughClass}Base`;
-        const throughImport = `../models/${toKebab(throughClass)}.base.model`;
+        const throughImport = `./${toKebab(throughClass)}.base.model`;
         imports.push({
           specifier: throughImport,
           names: [throughBaseClass],
@@ -529,7 +529,7 @@ function collectRefImports(
       const target = ctx.registry.get(ref);
       if (!target?.$id) continue;
       const cls = classNameFromId(target.$id);
-      const specifier = `../models/${toKebab(cls)}.base.model`;
+      const specifier = `./${toKebab(cls)}.base.model`;
       out.push({
         specifier,
         names: [`${cls}Base`, `${cls}BaseRelations`, `${cls}BaseWithRelations`],

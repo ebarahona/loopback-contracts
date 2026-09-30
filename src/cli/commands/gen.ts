@@ -18,6 +18,7 @@ import type {
   PipelineRunOptions,
 } from '../../engine';
 import {ContractsEngineBindings} from '../../engine/tokens';
+import {ContractsValidationError, resolveModelsDir} from '../../helpers';
 import {
   getEmitEsm,
   getEmitImportExtension,
@@ -45,8 +46,8 @@ const PIPELINE_STAGES = 8;
  * Thin CLI wrapper around {@link Pipeline.run}.
  *
  * Bootstraps a one-off LB4 {@link Application} wired with
- * {@link ContractsComponent}, parses the gen-specific flags (the thirteen
- * `--emit-<kind>` / `--no-emit-<kind>` overrides — nine sidecar kinds plus
+ * {@link ContractsComponent}, parses the gen-specific flags (the fourteen
+ * `--emit-<kind>` / `--no-emit-<kind>` overrides — ten sidecar kinds plus
  * four LB4-idiom kinds; the ESM trio `--esm` / `--no-esm` /
  * `--import-extension=<.js|.ts|>`; plus `--watch` / `dev`-mode), invokes
  * the pipeline once, and either exits or keeps a debounced chokidar
@@ -78,7 +79,19 @@ export async function runGen(opts: {
   const preBoot = parseFlagsPreBoot(opts.argv);
   const isWatch = preBoot.flags.watch;
 
-  const app = await bootstrap(opts.projectRoot, opts.config);
+  // `--out-dir` replaces the config's `outputDir` for this run, so the
+  // project paths, the import map and the pipeline all see one value.
+  // Validate it here so the error names the flag, not the config key.
+  if (preBoot.flags.outDir !== undefined) {
+    assertOutDirFlag(opts.projectRoot, opts.config, preBoot.flags.outDir);
+  }
+  const config: LoopbackConfigJson =
+    preBoot.flags.outDir === undefined
+      ? opts.config
+      : {...opts.config, outputDir: preBoot.flags.outDir};
+  const runOpts = {projectRoot: opts.projectRoot, config};
+
+  const app = await bootstrap(runOpts.projectRoot, runOpts.config);
 
   try {
     // Phase 2 — registry-aware validation of deferred `--emit-*` /
@@ -92,9 +105,9 @@ export async function runGen(opts: {
     const flags = await resolveEmitFlagsPostBoot(preBoot, registry);
 
     if (isWatch) {
-      return await runWatchMode(app, opts, flags);
+      return await runWatchMode(app, runOpts, flags);
     }
-    return await runOnce(app, opts, flags);
+    return await runOnce(app, runOpts, flags);
   } finally {
     try {
       await app.stop();
@@ -331,7 +344,7 @@ async function bootstrap(
         ContractsBindings.SCHEMA_REGISTRY,
       );
       const map: ImportMap = new RelativeImportMap(registry, schemaId =>
-        defaultTargetPath(paths.outputDir, schemaId),
+        defaultTargetPath(paths.modelsDir, schemaId),
       );
       return map;
     })
@@ -414,6 +427,7 @@ const KNOWN_LITERAL_FLAGS: ReadonlySet<string> = new Set([
   '--esm',
   '--no-esm',
   '--import-extension',
+  '--out-dir',
 ]);
 
 /**
@@ -445,6 +459,11 @@ export interface ParsedFlags {
    * wasn't passed. Empty string is a valid value (bundler resolution).
    */
   readonly importExtension: ImportExtension | undefined;
+  /**
+   * `--out-dir <dir>` / `--out-dir=<dir>` override for the config's
+   * `outputDir` (the models directory), or `undefined` when not passed.
+   */
+  readonly outDir: string | undefined;
 }
 
 /**
@@ -487,6 +506,7 @@ function parseFlagsPreBoot(argv: readonly string[]): PreBootFlags {
   let graphqlSdl = false;
   let esm: boolean | undefined;
   let importExtension: ImportExtension | undefined;
+  let outDir: string | undefined;
   const emitOverrides: Record<string, boolean> = {};
   const deferred: DeferredEmitToken[] = [];
 
@@ -566,6 +586,18 @@ function parseFlagsPreBoot(argv: readonly string[]): PreBootFlags {
       i++;
       continue;
     }
+    // `--out-dir=<dir>` / `--out-dir <dir>`: overrides `outputDir`.
+    if (arg.startsWith('--out-dir=') || arg === '--out-dir') {
+      const value =
+        arg === '--out-dir' ? args[++i] : arg.slice('--out-dir='.length);
+      if (value === undefined || value.length === 0) {
+        throw new TypeError(
+          '--out-dir requires a directory (relative to the project root).',
+        );
+      }
+      outDir = value;
+      continue;
+    }
     // `--no-emit-<kind>` and `--emit-<kind>` are deferred until the
     // `EmitterRegistry` is available — the resolved kind set is the
     // union of built-in TS-class emitters AND any plugin-contributed
@@ -608,6 +640,7 @@ function parseFlagsPreBoot(argv: readonly string[]): PreBootFlags {
     emitOverrides,
     esm,
     importExtension,
+    outDir,
   };
   return {flags, deferred};
 }
@@ -865,13 +898,13 @@ function shortTrigger(trigger: string, projectRoot: string): string {
  * over-approximation gets corrected by the emitter's own path computation
  * when it actually writes the file.
  */
-function defaultTargetPath(outputDir: string, schemaId: string): string {
+function defaultTargetPath(modelsDir: string, schemaId: string): string {
   const slug = schemaId
     .replace(/^[a-z]+:\/\//i, '')
     .replace(/[^a-z0-9]+/gi, '-')
     .replace(/^-+|-+$/g, '')
     .toLowerCase();
-  return join(outputDir, 'models', `${slug}.base.model.ts`);
+  return join(modelsDir, `${slug}.base.model.ts`);
 }
 
 /**
@@ -890,3 +923,23 @@ export const run = async (argv: readonly string[]): Promise<number> => {
     argv,
   });
 };
+
+// Reject a `--out-dir` value the project paths would refuse, naming the
+// flag as the source of the bad value.
+function assertOutDirFlag(
+  projectRoot: string,
+  config: LoopbackConfigJson,
+  outDir: string,
+): void {
+  const root = resolve(projectRoot);
+  const models = resolveModelsDir(root, outDir, {
+    schemasDir: resolve(root, config.schemasDir ?? './schemas'),
+    configsDir: resolve(root, config.configsDir ?? './configs'),
+  });
+  if (!models.ok) {
+    throw new ContractsValidationError(
+      `--out-dir ${models.problem}; got '${outDir}'`,
+      {sourcePath: '--out-dir', instancePath: ''},
+    );
+  }
+}

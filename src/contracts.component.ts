@@ -9,6 +9,7 @@ import {
   AvroEmitter,
   GraphQLEmitter,
   MockDataEmitter,
+  MongoDbEmitter,
   ProtoEmitter,
   TypesEmitter,
   ZodEmitter,
@@ -95,6 +96,7 @@ export class ContractsComponent implements Component {
     createBindingFromClass(ProtoEmitter),
     createBindingFromClass(AvroEmitter),
     createBindingFromClass(MockDataEmitter),
+    createBindingFromClass(MongoDbEmitter),
 
     // -------------------------------------------------------------------
     // Built-in schema sources. Same pattern — tag metadata lives on the

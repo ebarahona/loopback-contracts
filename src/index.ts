@@ -5,6 +5,7 @@
 // stay behind subpath imports and are not re-exported.
 
 export type {
+  BaselineConfig,
   ContractsValidator,
   EmittedFile,
   EmitterContext,

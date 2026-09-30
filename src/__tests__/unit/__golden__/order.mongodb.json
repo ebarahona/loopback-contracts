@@ -1,0 +1,80 @@
+{
+  "$jsonSchema": {
+    "title": "Order",
+    "bsonType": "object",
+    "properties": {
+      "_id": {
+        "bsonType": "objectId"
+      },
+      "orderId": {
+        "bsonType": "string",
+        "pattern": "^ord_[a-z0-9]+$"
+      },
+      "status": {
+        "bsonType": "string",
+        "enum": [
+          "open",
+          "paid",
+          "void"
+        ]
+      },
+      "quantity": {
+        "bsonType": [
+          "int",
+          "long"
+        ],
+        "minimum": 1,
+        "maximum": 100
+      },
+      "total": {
+        "bsonType": "object",
+        "properties": {
+          "amount": {
+            "bsonType": "number",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "currency": {
+            "bsonType": "string",
+            "enum": [
+              "USD",
+              "EUR"
+            ]
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "additionalProperties": false
+      },
+      "placedAt": {
+        "bsonType": "date"
+      },
+      "tags": {
+        "bsonType": "array",
+        "items": {
+          "bsonType": "string",
+          "minLength": 1
+        },
+        "maxItems": 10,
+        "uniqueItems": true
+      },
+      "note": {
+        "bsonType": [
+          "string",
+          "null"
+        ],
+        "maxLength": 500
+      }
+    },
+    "required": [
+      "orderId",
+      "status",
+      "quantity",
+      "total",
+      "placedAt"
+    ],
+    "additionalProperties": false
+  }
+}

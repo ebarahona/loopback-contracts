@@ -2,13 +2,21 @@ import {BindingScope, injectable} from '@loopback/core';
 import type {ValidateFunction} from 'ajv';
 import Ajv2020 from 'ajv/dist/2020';
 import {resolve} from 'node:path';
-import {ContractsValidationError, toKebab, toPascal} from '../../helpers';
+import {
+  ContractsValidationError,
+  isPlainSchemaId,
+  resolveSchemaRef,
+  schemaNameStems,
+  toKebab,
+  toPascal,
+} from '../../helpers';
 import type {
   EmittedFile,
   EmitterContext,
   JSONSchema,
   LossyReporter,
   ProjectionEmitter,
+  SchemaRegistry,
 } from '../../interfaces';
 import {ContractsBindings} from '../../keys';
 
@@ -89,16 +97,22 @@ export class AsyncAPIEmitter implements ProjectionEmitter<AsyncAPIPerSchemaOptio
   emit(ctx: EmitterContext<AsyncAPIPerSchemaOptions>): EmittedFile[] {
     const {schema, templates} = ctx;
     const options = this.validateOptions(ctx.options);
-    const id = typeof schema.$id === 'string' ? schema.$id : 'anonymous';
-    const baseName = id.replace(/\.v\d+$/, '');
-    const Name = toPascal(baseName);
-    const kebab = toKebab(baseName);
+    const {typeStem, fileStem} = schemaNameStems(
+      schema,
+      'strip-version',
+      'anonymous',
+      ctx.registry.list(),
+    );
+    const Name = toPascal(typeStem);
+    const kebab = toKebab(fileStem);
     const title =
       typeof schema.description === 'string' ? schema.description : Name;
 
     const renderCtx: RenderContext = {
       schemaId: typeof schema.$id === 'string' ? schema.$id : '',
       lossy: ctx.lossy,
+      schema,
+      registry: ctx.registry,
     };
     const schemaYaml = renderSchemaYaml(Name, schema, 4, renderCtx);
 
@@ -161,6 +175,9 @@ function isObjectSchema(s: unknown): s is JSONSchema {
 interface RenderContext {
   readonly schemaId: string;
   readonly lossy: LossyReporter;
+  /** Root schema and registry, for resolving URL-style `$ref`s. */
+  readonly schema: JSONSchema;
+  readonly registry: SchemaRegistry;
 }
 
 function renderSchemaYaml(
@@ -192,7 +209,7 @@ function emitSchemaBody(
   // `openapi-components-emitter.ts::rewriteRef`.
   const refValue = schema['$ref'];
   if (typeof refValue === 'string') {
-    lines.push(`${pad}$ref: ${yamlString(rewriteRef(refValue))}`);
+    lines.push(`${pad}$ref: ${yamlString(rewriteRef(refValue, renderCtx))}`);
     return;
   }
 
@@ -278,12 +295,24 @@ function emitSchemaBody(
  * absolute URLs pass through unchanged. Mirrors
  * `openapi-components-emitter.ts::rewriteRef`.
  */
-function rewriteRef(ref: string): string {
+function rewriteRef(ref: string, ctx: RenderContext): string {
   if (ref.startsWith('#')) return ref;
-  if (/^[a-z]+:\/\//i.test(ref)) return ref;
   const hashIdx = ref.indexOf('#');
   const id = hashIdx === -1 ? ref : ref.slice(0, hashIdx);
   const fragment = hashIdx === -1 ? '' : ref.slice(hashIdx);
+  // URL-style / relative ids: key on the target's component name (the same
+  // name this emitter gives that schema). Unloaded targets pass through.
+  if (!isPlainSchemaId(id)) {
+    const hit = resolveSchemaRef(ref, ctx.schema, ctx.registry);
+    if (hit === undefined) return ref;
+    const {typeStem} = schemaNameStems(
+      hit.document,
+      'strip-version',
+      'anonymous',
+      ctx.registry.list(),
+    );
+    return `#/components/schemas/${toPascal(typeStem)}${fragment}`;
+  }
   // Strip only the trailing `.vN` version segment so the ref targets the
   // same component key the emitter writes (`user.v1` -> `User`,
   // `acme.user.v1` -> `AcmeUser`).

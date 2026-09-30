@@ -527,7 +527,7 @@ Rules:
 - CHANGELOG.md is generated, never hand-edited. Entries come from Conventional Commit subjects; `feat` and `fix` show up automatically, other types only if explicitly configured.
 - The release PR is the only commit that touches `version`, `CHANGELOG.md`, and the lockfile in concert. Maintainers approve and merge it; merging tags and publishes.
 - npm publish is performed by CI, not by humans. The CI job needs `NPM_TOKEN` and runs `npm publish` only on the release commit.
-- Pre-1.0 plugins can mark every `@public` change as `BREAKING CHANGE` for the duration; this is the cleanest way to communicate that the surface is still unstable.
+- Pre-1.0 plugins can mark every `@public` change as `BREAKING CHANGE` for the duration; this is the cleanest way to communicate that the surface is still unstable. Set `"bump-minor-pre-major": true` in `release-please-config.json` first: without it, the first `BREAKING CHANGE` on a 0.x release proposes 1.0.0; with it, a pre-1.0 breaking change bumps the minor (0.1.0 to 0.2.0).
 - Generated artifacts (`dist/`, `*.d.ts`) are not committed. The `files` array in `package.json` controls what gets published.
 
 ## 18. Performance

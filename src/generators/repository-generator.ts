@@ -4,6 +4,7 @@ import {
   ContractsCodegenError,
   ContractsValidationError,
   assertNoTraversal,
+  modelsImportPrefix,
   resolveIdProperty,
   toKebab,
   toPascal,
@@ -182,7 +183,8 @@ export class RepositoryGenerator implements ProjectionEmitter {
     const dataSourceClass = `${toPascal(dataSourceName)}BaseDataSource`;
 
     const kebab = toKebab(className);
-    const modelImportPath = `../models/${kebab}.base.model`;
+    const modelsDir = modelsImportPrefix(ctx.paths, 'repositories');
+    const modelImportPath = `${modelsDir}/${kebab}.base.model`;
     const dataSourceImportPath = `../datasources/${toKebab(dataSourceName)}.base.datasource`;
 
     const relations = this.buildRelations(
@@ -248,7 +250,7 @@ export class RepositoryGenerator implements ProjectionEmitter {
       // the first `lb-contracts gen` run, so resolving via `ctx.importMap` (which
       // points at the extension) would emit a dangling import. Pin both
       // paths and class names to the always-regenerated base files.
-      const targetImportPath = `../models/${targetKebab}.base.model`;
+      const targetImportPath = `${modelsImportPrefix(ctx.paths, 'repositories')}/${targetKebab}.base.model`;
       const targetRepoImportPath = relRepoImport(targetKebab);
 
       const {factoryFnName, factoryTypeImport, factoryReturnType} =

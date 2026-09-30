@@ -35,6 +35,16 @@ export interface LoopbackConfigJson {
   readonly schemasDir: string;
   /** Directory containing authored `*.config.json` files. */
   readonly configsDir: string;
+  /**
+   * Directory, relative to the project root, that receives model-scoped
+   * output: the `models/` bucket every emitter writes to (`.base.model.ts`,
+   * `.model.ts`, and the zod / types / openapi-components / ... sidecars).
+   * Must resolve inside the project root. Default `src/models`. The CLI's
+   * `lb-contracts gen --out-dir <dir>` overrides it for one run.
+   *
+   * @experimental
+   */
+  readonly outputDir?: string;
   /** Default runtime validator — drives `loopback-config` and sidecar emission. */
   readonly validator: 'ajv' | 'zod';
   /** Schema-source URIs the engine fetches on every run. */
@@ -68,6 +78,37 @@ export interface LoopbackConfigJson {
    * meta-schema at stage 5 so typos under `security.*` fail loud.
    */
   readonly security?: SecurityConfig;
+  /**
+   * Optional stage-6 breaking-change baseline settings; see
+   * {@link BaselineConfig}. Absent means the defaults.
+   *
+   * @experimental
+   */
+  readonly baseline?: BaselineConfig;
+}
+
+/**
+ * Settings for the committed `contracts.lock.json` baseline that pipeline
+ * stage 6 compares every run against.
+ *
+ * @experimental
+ */
+export interface BaselineConfig {
+  /**
+   * Run the stage-6 gate and maintain `contracts.lock.json`. Default
+   * `true`. `false` skips the comparison entirely: the file is neither
+   * read nor written.
+   */
+  readonly enabled?: boolean;
+  /**
+   * Store the full body of schemas fetched from remote sources (`npm:`,
+   * `git+`, `https:`, plugin schemes) in the committed lock so their edits
+   * are classified like local ones. Default `false`: the lock records only
+   * their `$id` and a content digest, so private contract content never
+   * lands in the repository, and any change to such a schema counts as
+   * breaking until accepted.
+   */
+  readonly includeRemote?: boolean;
 }
 
 /**

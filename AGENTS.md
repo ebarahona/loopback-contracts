@@ -12,9 +12,10 @@ substrate for LoopBack 4. The user authors `schemas/*.schema.json` (pure
 JSON Schema 2020-12) and `configs/*.config.json` (LB-isms, datasource,
 relations, ACLs, hidden fields); the engine emits LB4
 `@model` / `@repository` / `@controller` / `@lifeCycleObserver`
-datasource classes plus nine opt-in sidecar formats (Zod, pure TS
+datasource classes plus ten opt-in sidecar formats (Zod, pure TS
 interfaces, GraphQL code-first + SDL, CloudEvents, AsyncAPI 3.0,
-Protocol Buffers, Avro, OpenAPI components, mock fixtures). The CLI
+Protocol Buffers, Avro, OpenAPI components, mock fixtures, MongoDB
+`$jsonSchema` validators). The CLI
 surface is 15 commands. The architecture is an **engine + emitter
 split** with six extension points (`EMITTER_TAG`, `SOURCE_TAG`,
 `SOURCE_EXTENSION_TAG`, `EXTENSION_KEYWORD_TAG`,

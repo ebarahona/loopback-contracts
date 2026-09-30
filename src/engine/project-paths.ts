@@ -1,6 +1,6 @@
 import {injectable} from '@loopback/core';
 import {isAbsolute, resolve} from 'node:path';
-import {ContractsValidationError} from '../helpers';
+import {ContractsValidationError, resolveModelsDir} from '../helpers';
 import type {ProjectPaths} from '../interfaces';
 import type {LoopbackConfigJson} from '../types';
 
@@ -10,7 +10,10 @@ import type {LoopbackConfigJson} from '../types';
  * have to worry about the current working directory.
  *
  * Config defaults mirror `lb-contracts init`: `schemasDir` falls back to `./schemas`
- * and `configsDir` falls back to `./configs`.
+ * and `configsDir` falls back to `./configs`. `outputDir` (the models
+ * directory) falls back to `src/models` and must resolve inside the project
+ * root, outside `node_modules`, `.git`, `_meta`, `.loopback` and the
+ * schemas / configs directories.
  *
  * @internal
  */
@@ -20,6 +23,7 @@ export class DefaultProjectPaths implements ProjectPaths {
   readonly outputDir: string;
   readonly schemasDir: string;
   readonly configsDir: string;
+  readonly modelsDir: string;
 
   constructor(root: string, config: LoopbackConfigJson) {
     if (!isAbsolute(root)) {
@@ -32,6 +36,15 @@ export class DefaultProjectPaths implements ProjectPaths {
     this.outputDir = resolve(this.root, 'src');
     this.schemasDir = resolve(this.root, config.schemasDir ?? './schemas');
     this.configsDir = resolve(this.root, config.configsDir ?? './configs');
+    const models = resolveModelsDir(this.root, config.outputDir, this);
+    if (!models.ok) {
+      throw new ContractsValidationError(
+        `loopback.config.json 'outputDir' ${models.problem}; ` +
+          `got '${config.outputDir ?? ''}'`,
+        {sourcePath: this.loopbackConfigPath, instancePath: '/outputDir'},
+      );
+    }
+    this.modelsDir = models.modelsDir;
   }
 
   /** Directory for engine-emitted metadata (run report, lossy log, lockfile). */

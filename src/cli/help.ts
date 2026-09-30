@@ -25,8 +25,8 @@ function readPackageVersion(): string {
 /**
  * Build the full help screen as a single string with a trailing
  * newline. Lists the seven user-facing commands; `lb-contracts gen` accepts
- * thirteen `--emit-<kind>` flags listed in the EMIT FLAGS tables
- * (nine sidecar kinds + four LB4-idiom kinds), plus the matching
+ * fourteen `--emit-<kind>` flags listed in the EMIT FLAGS tables
+ * (ten sidecar kinds + four LB4-idiom kinds), plus the matching
  * `--no-emit-<kind>` overrides documented under `lb-contracts gen --help`.
  * Sidecars default OFF (opt-in); LB4-idiom kinds default ON (opt-out).
  *
@@ -68,6 +68,7 @@ export function renderHelp(): string {
     '  --emit-avro               Emit *.avsc sidecars',
     '  --emit-openapi-components Emit *.openapi-components.yaml sidecars',
     '  --emit-mock-data          Emit *.mock.json sidecars',
+    '  --emit-mongodb            Emit *.mongodb.json $jsonSchema validators (experimental)',
     '',
     'GEN EMIT FLAGS — LB4-idiom (opt-out, default on)',
     '  --no-emit-model           Skip *.base.model.ts regen',
@@ -77,7 +78,7 @@ export function renderHelp(): string {
     '',
     'GLOBAL FLAGS',
     '  --strict         Promote warnings (lossy translations, breaking diffs) to errors',
-    '  --allow-breaking Bypass backward-compat refusal for version-pin bumps',
+    '  --allow-breaking Accept breaking schema changes against contracts.lock.json (gen, validate)',
     '  -h, --help       Show help',
     '  -v, --version    Show version',
     '',

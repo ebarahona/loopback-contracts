@@ -62,7 +62,7 @@ type ValidatorKind = 'ajv' | 'zod';
 type EmitValue = boolean | '.js' | '.ts' | '';
 
 /**
- * Canonical multi-select labels for the nine built-in sidecar emitters, in
+ * Canonical multi-select labels for the ten built-in sidecar emitters, in
  * the exact wording shown in the doc's "Project initialization (lb-contracts init)"
  * section. Third-party emitter contributions discovered through the registry
  * fall back to a synthesised label.
@@ -83,9 +83,11 @@ const BUILTIN_EMIT_LABELS: Readonly<Record<string, string>> = {
     'OpenAPI components (*.openapi-components.yaml) — mountable fragments for OAS documents',
   'mock-data':
     'Mock fixtures (*.mock.json) — `json-schema-faker` sample data per schema',
+  mongodb:
+    'MongoDB validator (*.mongodb.json) — `$jsonSchema` for createCollection / collMod (experimental)',
 };
 
-/** Canonical display order for the nine built-in emitters. */
+/** Canonical display order for the ten built-in emitters. */
 const BUILTIN_EMIT_ORDER: readonly string[] = [
   'zod',
   'types',
@@ -96,6 +98,7 @@ const BUILTIN_EMIT_ORDER: readonly string[] = [
   'avro',
   'openapi-components',
   'mock-data',
+  'mongodb',
 ];
 
 const CONFIG_FILENAME = 'loopback.config.json';
@@ -338,7 +341,7 @@ async function discoverEmitterKinds(): Promise<readonly EmitterMetadata[]> {
 }
 
 /**
- * Sort metadata so the nine built-ins appear in the canonical doc order
+ * Sort metadata so the ten built-ins appear in the canonical doc order
  * first, followed by any third-party kinds sorted alphabetically for stable
  * output.
  */

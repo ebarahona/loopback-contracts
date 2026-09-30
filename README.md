@@ -304,18 +304,19 @@ Core LoopBack outputs:
 
 Optional sidecar outputs:
 
-| Flag                        | Output                        |
-| --------------------------- | ----------------------------- |
-| `--emit-zod`                | Zod validators                |
-| `--emit-types`              | TypeScript interfaces         |
-| `--emit-graphql`            | GraphQL code-first decorators |
-| `--emit-graphql-sdl`        | GraphQL SDL                   |
-| `--emit-cloudevents`        | typed CloudEvents wrappers    |
-| `--emit-asyncapi`           | AsyncAPI fragments            |
-| `--emit-proto`              | Protocol Buffers schema       |
-| `--emit-avro`               | Avro schema                   |
-| `--emit-openapi-components` | OpenAPI components fragment   |
-| `--emit-mock-data`          | mock JSON fixtures            |
+| Flag                        | Output                                         |
+| --------------------------- | ---------------------------------------------- |
+| `--emit-zod`                | Zod validators                                 |
+| `--emit-types`              | TypeScript interfaces                          |
+| `--emit-graphql`            | GraphQL code-first decorators                  |
+| `--emit-graphql-sdl`        | GraphQL SDL                                    |
+| `--emit-cloudevents`        | typed CloudEvents wrappers                     |
+| `--emit-asyncapi`           | AsyncAPI fragments                             |
+| `--emit-proto`              | Protocol Buffers schema                        |
+| `--emit-avro`               | Avro schema                                    |
+| `--emit-openapi-components` | OpenAPI components fragment                    |
+| `--emit-mock-data`          | mock JSON fixtures                             |
+| `--emit-mongodb`            | MongoDB `$jsonSchema` validator (experimental) |
 
 </details>
 
@@ -669,6 +670,29 @@ Promotes lossy-translation warnings to errors.
 
 Skips final TypeScript validation.
 
+### `lb-contracts gen --allow-breaking`
+
+Accepts breaking schema changes. Every `gen` and `validate` compares each
+schema with its last accepted form in the committed `contracts.lock.json`
+and fails on a breaking change (property removed or newly required, enum
+value removed, type tightened, ...). A successful `gen` updates the
+baseline; `validate` never writes it. Remote-source schemas are recorded
+by digest only unless `"baseline": {"includeRemote": true}`; turn the gate
+off with `"baseline": {"enabled": false}`. Upgrading from 0.1.0: run `gen`
+once and commit the new `contracts.lock.json`. See
+[docs/cli.md](./docs/cli.md#breaking-change-gate).
+
+### `lb-contracts gen --out-dir <dir>`
+
+Writes model-scoped output (`.base.model.ts`, `.model.ts` and every
+sidecar) to `<dir>` instead of `src/models`. Same as the
+`loopback.config.json` key `"outputDir"`; the flag wins for that run. The
+directory is relative to the project root and must stay inside it, outside
+`node_modules`, `.git`, `_meta`, `.loopback` and the schemas / configs
+directories. Symlinks are not resolved.
+Repositories and controllers stay under `src/` and import models from the
+configured directory.
+
 </details>
 
 <details>
@@ -761,6 +785,7 @@ Built-in emitters include:
 - Protocol Buffers
 - Avro
 - mock fixtures
+- MongoDB `$jsonSchema` validator (experimental)
 
 ### Code-based emitters
 

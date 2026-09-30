@@ -1,15 +1,33 @@
 import {BindingScope, injectable} from '@loopback/core';
-import {ContractsPeerDepMissingError, toKebab, toPascal} from '../../helpers';
+import {
+  ContractsPeerDepMissingError,
+  ContractsValidationError,
+  resolveSchemaRef,
+  schemaNameStems,
+  toKebab,
+  toPascal,
+  walkJsonPointer,
+} from '../../helpers';
 import type {
   EmittedFile,
   EmitterContext,
   JSONSchema,
+  LossyReport,
   ProjectionEmitter,
-  SchemaRegistry,
 } from '../../interfaces';
 import {ContractsBindings} from '../../keys';
 
 const PEER_DEP = 'json-schema-to-typescript';
+
+// Lossy-feature labels this emitter reports for `$ref` translation. They
+// match the Zod emitter's labels and both become hard errors under
+// `--strict`.
+const UNRESOLVED_REF = 'unresolved-$ref';
+const RECURSIVE_FRAGMENT_REF = 'recursive-fragment-$ref';
+const STRICT_LOSSY_FEATURES: ReadonlySet<string> = new Set([
+  UNRESOLVED_REF,
+  RECURSIVE_FRAGMENT_REF,
+]);
 
 /**
  * Sidecar emitter that compiles a JSON Schema into pure TypeScript
@@ -18,6 +36,30 @@ const PEER_DEP = 'json-schema-to-typescript';
  *
  * Returns a `Promise` from `emit()` because the upstream `compile()` call
  * is async-only; the engine runner `await`s the result.
+ *
+ * Every file exports its root type under the schema's canonical name
+ * (`toPascal` of {@link schemaNameStems}' `typeStem`, the same name the Zod
+ * emitter uses); when the upstream compiler derives a different name (from
+ * `title`), a `export type <Canonical> = <Derived>;` alias is appended.
+ *
+ * `$ref` translation (resolved the same way pipeline stage 4 validates it,
+ * mirroring the Zod emitter):
+ *
+ * - A ref to another registered schema imports that schema's root type
+ *   (`import type {Money} from './money.types';`). The engine's
+ *   module-format pass appends the `--esm` import extension.
+ * - A ref to this schema itself names the root type (TypeScript allows the
+ *   recursion).
+ * - A ref with a JSON Pointer fragment (`#/$defs/tag`, `money#/$defs/x`) is
+ *   inlined from the target document. A titled fragment still becomes a
+ *   named declaration in this file.
+ * - A fragment ref that recurses into itself becomes `unknown`
+ *   (`recursive-fragment-$ref`).
+ * - A ref no loaded schema satisfies, or a pointer that does not exist,
+ *   becomes `unknown` (`unresolved-$ref`).
+ *
+ * Both lossy features are warnings by default and hard errors under
+ * `--strict`.
  *
  * @experimental
  */
@@ -48,15 +90,21 @@ export class TypesEmitter implements ProjectionEmitter {
 
   async emit(ctx: EmitterContext): Promise<EmittedFile[]> {
     const schemaId = ctx.schema.$id ?? '<no-$id>';
-    const pascalName = toPascal(schemaId);
-    const fileBase = toKebab(schemaId);
+    const {typeStem, fileStem} = schemaNameStems(
+      ctx.schema,
+      'full',
+      schemaId,
+      ctx.registry.list(),
+    );
+    const pascalName = toPascal(typeStem);
+    const fileBase = toKebab(fileStem);
 
-    // Pre-resolve all `$ref`s against the registry into an injected `$defs`
-    // block and rewrite refs to JSON Pointer form. Without this step
-    // `json-schema-to-typescript` hands $id-style refs to
+    // Rewrite every `$ref` before compiling (see the class docs). Without
+    // this step `json-schema-to-typescript` hands $id-style refs to
     // `@apidevtools/json-schema-ref-parser`, which treats them as relative
-    // filesystem paths and crashes on `ENOENT`.
-    const prepared = prepareSchemaForCompile(ctx.schema, ctx.registry);
+    // filesystem paths and crashes on `ENOENT` (or on a dangling pointer).
+    const preparer = new TypesRefPreparer(ctx, pascalName);
+    const prepared = preparer.prepare();
 
     const {compile} = loadJsonSchemaToTypescript();
     // `bannerComment: ''` suppresses the upstream "DO NOT MODIFY" header so
@@ -69,11 +117,15 @@ export class TypesEmitter implements ProjectionEmitter {
     // declare `additionalProperties: false` on the schema explicitly.
     //
     // `$refOptions.resolve.{file,http}: false` disables the upstream
-    // ref-parser's filesystem and HTTP loaders so unresolved refs surface
-    // as inline `unknown`s instead of process-crashing `ENOENT`s.
-    // `declareExternallyReferenced: false` keeps the output focused on the
-    // root schema; cross-schema types live in their own `.types.ts` files
-    // and are re-imported by name.
+    // ref-parser's filesystem and HTTP loaders; no `$ref` survives
+    // preparation, so this is a guard only.
+    // `ignoreMinAndMaxItems: true` keeps `minItems` / `maxItems` arrays as
+    // `T[]`; the upstream default renders them as tuples (`[T, ...T[]]`),
+    // which are awkward to build and assign. The bounds stay in the JSDoc
+    // and are enforced by the Zod / Ajv validators, not the static type.
+    // `declareExternallyReferenced: true` declares every titled subschema
+    // (including inlined `$defs` fragments) the root type names; cross-
+    // schema types are imported rather than declared here.
     // `json-schema-to-typescript`'s `compile()` option only accepts
     // `boolean | 'preserve'`. The source schema may legally carry a full
     // sub-schema in `additionalProperties` (e.g., `{type: 'string'}`); we
@@ -105,16 +157,25 @@ export class TypesEmitter implements ProjectionEmitter {
           `not enforced in the emitted .types.ts.`,
       });
     }
-    const content = await compile(
+    const compiled = await compile(
       prepared as Parameters<typeof compile>[0],
       pascalName,
       {
         bannerComment: '',
         additionalProperties,
-        declareExternallyReferenced: false,
+        declareExternallyReferenced: true,
+        ignoreMinAndMaxItems: true,
         $refOptions: {resolve: {file: false, http: false}},
       },
     );
+    // The upstream compiler emits the root declaration first.
+    const rootName = /^export (?:interface|type) (\w+)/m.exec(compiled)?.[1];
+    const alias =
+      rootName !== undefined && rootName !== pascalName
+        ? `export type ${pascalName} = ${rootName};\n`
+        : '';
+    const imports = preparer.renderImports();
+    const content = (imports === '' ? '' : `${imports}\n`) + compiled + alias;
 
     return [
       {
@@ -124,6 +185,23 @@ export class TypesEmitter implements ProjectionEmitter {
         producer: 'types-emitter',
       },
     ];
+  }
+
+  validate(input: {schema: JSONSchema; lossy: LossyReport}): void {
+    if (!STRICT_LOSSY_FEATURES.has(input.lossy.feature)) return;
+    const schemaId =
+      typeof input.schema.$id === 'string' ? input.schema.$id : '<unknown>';
+    throw new ContractsValidationError(
+      `Types emitter rejected lossy translation '${input.lossy.feature}' ` +
+        `on schema '${schemaId}': ${input.lossy.message}`,
+      {
+        sourcePath: schemaId,
+        instancePath: input.lossy.source.propertyPath ?? '',
+        ...(typeof input.schema.$id === 'string'
+          ? {schemaId: input.schema.$id}
+          : {}),
+      },
+    );
   }
 }
 
@@ -161,144 +239,191 @@ function loadJsonSchemaToTypescript(): JsonSchemaToTypescriptModule {
 }
 
 /**
- * Clone the root schema, walk every `$ref`, and rewrite cross-document
- * `$id`-style refs (`"customer.v1"`) into intra-document JSON Pointer refs
- * (`"#/$defs/customer.v1"`). Each referenced target is copied under a
- * synthetic top-level `$defs` block keyed by `$id`, with transitive refs
- * resolved breadth-first so the final document is closed under reachability.
- *
- * Intra-document refs (`#/...`) and absolute URLs (`http://...`) pass
- * through untouched — those are the two shapes the upstream compiler
- * already handles correctly.
+ * Per-emit `$ref` rewriter. Clones the root schema with every `$ref`
+ * replaced (see {@link TypesEmitter}) so the upstream compiler never
+ * dereferences anything, and collects the `import type` lines the output
+ * needs.
  */
-function prepareSchemaForCompile(
-  root: JSONSchema,
-  registry: SchemaRegistry,
-): JSONSchema {
-  const visited = new Set<string>();
-  const defs: Record<string, JSONSchema> = {};
-  // Don't re-inject the root schema into its own `$defs`. Skip the empty
-  // string explicitly: `$id === ''` would seed `visited` with `''` and
-  // any subsequent registry lookup keyed on `''` would falsely report a
-  // cycle and drop the target.
-  if (root.$id !== undefined && root.$id !== '') visited.add(root.$id);
+class TypesRefPreparer {
+  private readonly root: JSONSchema;
+  // module specifier -> (exported name -> local name)
+  private readonly imports = new Map<string, Map<string, string>>();
+  private readonly usedLocals = new Set<string>();
+  // `<doc id>#<pointer>` of fragments currently being inlined.
+  private readonly inlining = new Set<string>();
+  // Inlined fragments, reused by identity so the upstream compiler declares
+  // a titled fragment once however often it is referenced.
+  private readonly inlined = new Map<string, unknown>();
 
-  const queue: JSONSchema[] = [];
-  const cloned = cloneAndCollect(root, registry, defs, visited, queue);
-
-  // Drain the queue: every cloned referenced schema may itself contain
-  // refs to other schemas. Process them one at a time so cycles terminate
-  // via the visited set.
-  while (queue.length > 0) {
-    const next = queue.shift();
-    if (next === undefined) break;
-    const id = next.$id;
-    if (id === undefined) continue;
-    defs[id] = cloneAndCollect(next, registry, defs, visited, queue);
+  constructor(
+    private readonly ctx: EmitterContext,
+    private readonly rootName: string,
+  ) {
+    this.root = ctx.schema;
+    this.usedLocals.add(rootName);
   }
 
-  // Only inject `$defs` when we actually rewrote at least one ref; an
-  // empty block changes nothing for the compiler but pollutes the
-  // generated output with a stray `Defs` interface.
-  if (Object.keys(defs).length === 0) return cloned;
-  const out = cloned as Record<string, unknown>;
-  const existingDefs = out['$defs'];
-  if (existingDefs !== undefined && typeof existingDefs === 'object') {
-    out['$defs'] = {...(existingDefs as Record<string, unknown>), ...defs};
-  } else {
-    out['$defs'] = defs;
-  }
-  return out as JSONSchema;
-}
-
-function cloneAndCollect(
-  node: JSONSchema,
-  registry: SchemaRegistry,
-  defs: Record<string, JSONSchema>,
-  visited: Set<string>,
-  queue: JSONSchema[],
-): JSONSchema {
-  return walk(node, registry, defs, visited, queue) as JSONSchema;
-}
-
-function walk(
-  node: unknown,
-  registry: SchemaRegistry,
-  defs: Record<string, JSONSchema>,
-  visited: Set<string>,
-  queue: JSONSchema[],
-): unknown {
-  if (Array.isArray(node)) {
-    return node.map(child => walk(child, registry, defs, visited, queue));
-  }
-  if (node === null || typeof node !== 'object') return node;
-
-  const src = node as Record<string, unknown>;
-  // Object-level handling for `$ref`: the upstream `ref-parser` errors out
-  // on any unresolved `$ref` regardless of `resolve.file/http: false`, so
-  // we must rewrite the whole node (not just the string value) when we
-  // can't satisfy it from the registry.
-  const refValue = src['$ref'];
-  if (typeof refValue === 'string') {
-    const resolved = resolveRef(refValue, registry, defs, visited, queue);
-    if (resolved === undefined) {
-      // Drop the ref entirely; the rest of the node's siblings (if any)
-      // carry through so co-located JSON-Schema annotations like
-      // `description` aren't lost. An empty schema compiles to `unknown`
-      // (with `unknownAny: true`) or `any`.
-      const fallback: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(src)) {
-        if (key === '$ref') continue;
-        fallback[key] = walk(value, registry, defs, visited, queue);
-      }
-      return fallback;
+  prepare(): JSONSchema {
+    // Root `$defs` are only reachable through fragment refs, which are
+    // inlined, so they are dropped rather than rewritten.
+    const rest: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(this.root)) {
+      if (key !== '$defs' && key !== 'definitions') rest[key] = value;
     }
-    // Successful rewrite: emit only the rewritten `$ref` so the upstream
-    // compiler treats this as a pure reference (mixing `$ref` with sibling
-    // keys is undefined behaviour in JSON Schema draft-07, the dialect
-    // `json-schema-to-typescript` targets).
-    return {$ref: resolved};
+    return this.walk(rest, this.root, []) as JSONSchema;
   }
 
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(src)) {
-    out[key] = walk(value, registry, defs, visited, queue);
+  /** `import type` lines for every referenced schema, sorted. */
+  renderImports(): string {
+    return [...this.imports.keys()]
+      .sort()
+      .map(specifier => {
+        const names = [...(this.imports.get(specifier) ?? new Map())]
+          .map(([exported, local]) =>
+            exported === local ? exported : `${exported} as ${local}`,
+          )
+          .sort()
+          .join(', ');
+        return `import type {${names}} from '${specifier}';\n`;
+      })
+      .join('');
   }
-  return out;
-}
 
-/**
- * Rewrite one `$ref` value. Intra-document refs and absolute URLs pass
- * through as-is; bare `$id`-style refs are looked up in the registry,
- * queued for inclusion under `$defs`, and replaced with a JSON Pointer
- * ref. Returns `undefined` when the ref cannot be satisfied so the
- * caller can drop the whole node — the upstream compiler crashes on any
- * unresolved external `$ref` even with filesystem resolvers disabled.
- */
-function resolveRef(
-  ref: string,
-  registry: SchemaRegistry,
-  defs: Record<string, JSONSchema>,
-  visited: Set<string>,
-  queue: JSONSchema[],
-): string | undefined {
-  if (ref.startsWith('#')) return ref;
-  if (/^[a-z]+:\/\//i.test(ref)) return ref;
-
-  const hashIdx = ref.indexOf('#');
-  const id = hashIdx === -1 ? ref : ref.slice(0, hashIdx);
-  const fragment = hashIdx === -1 ? '' : ref.slice(hashIdx);
-
-  const target = registry.get(id);
-  if (target === undefined) return undefined;
-
-  if (!visited.has(id)) {
-    visited.add(id);
-    queue.push(target);
+  private walk(node: unknown, document: JSONSchema, path: string[]): unknown {
+    if (Array.isArray(node)) {
+      return node.map((child, i) =>
+        this.walk(child, document, [...path, `${i}`]),
+      );
+    }
+    if (node === null || typeof node !== 'object') return node;
+    const src = node as Record<string, unknown>;
+    const ref = src['$ref'];
+    if (typeof ref === 'string')
+      return this.renderRef(src, ref, document, path);
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(src)) {
+      out[key] = this.walk(value, document, [...path, key]);
+    }
+    return out;
   }
-  // Slash and tilde have special meaning in JSON Pointer (RFC 6901); the
-  // typical `$id` (`customer.v1`) contains neither, but encode defensively
-  // so a `foo/bar` id can't slip past as two path segments.
-  const pointerKey = id.replace(/~/g, '~0').replace(/\//g, '~1');
-  return `#/$defs/${pointerKey}${fragment}`;
+
+  // Keeps only `description` from the `$ref` node's siblings; the upstream
+  // compiler targets draft-07, where `$ref` siblings are ignored.
+  private renderRef(
+    node: Record<string, unknown>,
+    ref: string,
+    document: JSONSchema,
+    path: string[],
+  ): unknown {
+    const described = (schema: Record<string, unknown>): unknown =>
+      typeof node['description'] === 'string'
+        ? {...schema, description: node['description']}
+        : schema;
+
+    const resolved = resolveSchemaRef(ref, document, this.ctx.registry);
+    if (resolved === undefined) {
+      this.lossy(
+        UNRESOLVED_REF,
+        path,
+        `$ref '${ref}' does not match any loaded schema; emitted unknown.`,
+        'Load the referenced schema, or fix the $ref / $id.',
+      );
+      return described({});
+    }
+    const {document: target, id, pointer} = resolved;
+
+    if (pointer === '') {
+      const name =
+        target === this.root || (id !== '' && id === this.root.$id)
+          ? this.rootName
+          : this.importFor(target);
+      return described({tsType: name});
+    }
+
+    const key = `${id}#${pointer}`;
+    const sub = walkJsonPointer(target, pointer);
+    if (sub === undefined || sub === null || typeof sub !== 'object') {
+      if (typeof sub === 'boolean') return sub;
+      this.lossy(
+        UNRESOLVED_REF,
+        path,
+        `$ref '${ref}' does not resolve: '${id || '<root>'}' has no ` +
+          `'#${pointer}'; emitted unknown.`,
+        'Fix the JSON Pointer or add the missing $defs entry.',
+      );
+      return described({});
+    }
+    if (this.inlining.has(key)) {
+      this.lossy(
+        RECURSIVE_FRAGMENT_REF,
+        path,
+        `$ref '${ref}' recurses into itself; fragment refs are inlined, so ` +
+          `the recursive occurrence is emitted as unknown.`,
+        'Move the recursive shape into its own schema file and $ref it by $id.',
+      );
+      return described({});
+    }
+    let out = this.inlined.get(key);
+    if (out === undefined) {
+      this.inlining.add(key);
+      try {
+        out = this.walk(sub, target, path);
+      } finally {
+        this.inlining.delete(key);
+      }
+      this.inlined.set(key, out);
+    }
+    return typeof out === 'object' && out !== null
+      ? described(out as Record<string, unknown>)
+      : out;
+  }
+
+  // Register (once) the import of `target`'s root type and return the local
+  // binding name, aliasing when two targets share a name.
+  private importFor(target: JSONSchema): string {
+    const {typeStem, fileStem} = schemaNameStems(
+      target,
+      'full',
+      '<no-$id>',
+      this.ctx.registry.list(),
+    );
+    const exported = toPascal(typeStem);
+    const specifier = `./${toKebab(fileStem)}.types`;
+    let names = this.imports.get(specifier);
+    const existing = names?.get(exported);
+    if (existing !== undefined) return existing;
+    let local = exported;
+    if (this.usedLocals.has(local)) {
+      const base = toPascal(fileStem);
+      local = base;
+      for (let n = 2; this.usedLocals.has(local); n++) local = `${base}${n}`;
+    }
+    this.usedLocals.add(local);
+    if (names === undefined) {
+      names = new Map();
+      this.imports.set(specifier, names);
+    }
+    names.set(exported, local);
+    return local;
+  }
+
+  private lossy(
+    feature: string,
+    path: string[],
+    message: string,
+    workaround: string,
+  ): void {
+    this.ctx.lossy.report({
+      feature,
+      source: {
+        schemaId: typeof this.root.$id === 'string' ? this.root.$id : '',
+        propertyPath: path
+          .map(seg => '/' + seg.replace(/~/g, '~0').replace(/\//g, '~1'))
+          .join(''),
+      },
+      severity: 'warn',
+      message,
+      workaround,
+    });
+  }
 }

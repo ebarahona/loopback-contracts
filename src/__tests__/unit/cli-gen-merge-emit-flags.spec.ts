@@ -48,6 +48,7 @@ function baseFlags(overrides: Record<string, boolean> = {}): ParsedFlags {
     emitOverrides: overrides,
     esm: undefined,
     importExtension: undefined,
+    outDir: undefined,
   };
 }
 

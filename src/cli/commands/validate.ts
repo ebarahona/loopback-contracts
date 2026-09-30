@@ -53,6 +53,7 @@ export interface RunValidateOptions {
 interface ValidateFlags {
   readonly quiet: boolean;
   readonly json: boolean;
+  readonly allowBreaking: boolean;
   readonly stage: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | undefined;
 }
 
@@ -119,7 +120,7 @@ export async function runValidate(opts: RunValidateOptions): Promise<number> {
         ContractsBindings.SCHEMA_REGISTRY,
       );
       const map: ImportMap = new RelativeImportMap(registry, schemaId =>
-        join(paths.outputDir, 'models', `${schemaId}.base.model.ts`),
+        join(paths.modelsDir, `${schemaId}.base.model.ts`),
       );
       return map;
     })
@@ -158,6 +159,7 @@ export async function runValidate(opts: RunValidateOptions): Promise<number> {
       validateOnly: true,
       skipMetaSchemaWrite: true,
       skipTsc: true,
+      allowBreaking: flags.allowBreaking,
     };
     // `maxStage` clamps validation to stages 1..N for partial runs;
     // `validateOnly` already caps the upper bound at 6.
@@ -208,12 +210,14 @@ export async function runValidate(opts: RunValidateOptions): Promise<number> {
 function parseFlags(argv: readonly string[]): ValidateFlags {
   let quiet = false;
   let json = false;
+  let allowBreaking = false;
   let stage: ValidateFlags['stage'] = undefined;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--quiet') quiet = true;
     else if (arg === '--json') json = true;
+    else if (arg === '--allow-breaking') allowBreaking = true;
     else if (arg === '--stage') {
       const next = argv[i + 1];
       const parsed = next !== undefined ? Number.parseInt(next, 10) : NaN;
@@ -231,7 +235,7 @@ function parseFlags(argv: readonly string[]): ValidateFlags {
     }
   }
 
-  return {quiet, json, stage};
+  return {quiet, json, allowBreaking, stage};
 }
 
 /**

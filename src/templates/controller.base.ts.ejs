@@ -32,7 +32,7 @@ import {
   requestBody,
   response,
 } from '@loopback/rest';
-import {<%- Name %>} from '../models/<%- h.kebab(ControllerName) %>.base.model';
+import {<%- Name %>} from '<%- modelsImportDir %>/<%- h.kebab(ControllerName) %>.base.model';
 import {<%- Name %>Repository} from '../repositories/<%- h.kebab(ControllerName) %>.base.repository';
 
 /**

@@ -5,6 +5,7 @@ import {ZodEmitter} from '../../emitters/library/zod-emitter';
 import {AsyncAPIEmitter} from '../../emitters/semantic/asyncapi-emitter';
 import {AvroEmitter} from '../../emitters/semantic/avro-emitter';
 import {GraphQLEmitter} from '../../emitters/semantic/graphql-emitter';
+import {MongoDbEmitter} from '../../emitters/semantic/mongodb-emitter';
 import {ProtoEmitter} from '../../emitters/semantic/proto-emitter';
 
 /**
@@ -47,6 +48,10 @@ describe('sidecar emitter perSchemaOptionsSchema invariant', () => {
       schema: new GraphQLEmitter().perSchemaOptionsSchema,
     },
     {name: 'ProtoEmitter', schema: new ProtoEmitter().perSchemaOptionsSchema},
+    {
+      name: 'MongoDbEmitter',
+      schema: new MongoDbEmitter().perSchemaOptionsSchema,
+    },
   ];
 
   for (const {name, schema} of cases) {

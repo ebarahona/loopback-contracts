@@ -27,7 +27,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: rm -f package-lock.json && npm install --include=optional --no-audit --no-fund
+        run: npm ci --include=optional --no-audit --no-fund
 
       - name: Generate docs
         run: npx typedoc

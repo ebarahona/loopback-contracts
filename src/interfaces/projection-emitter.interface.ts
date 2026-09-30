@@ -28,6 +28,7 @@ export type KnownEmitterKind =
   | 'avro'
   | 'openapi-components'
   | 'mock-data'
+  | 'mongodb'
   // LB4-idiom emitters (tier 'lb4-idiom'). Always-on by default — every
   // `lb-contracts gen` regenerates the base files. Sidecars opt in; LB4 idiom
   // files opt OUT (via `--no-emit-<kind>`) when a user genuinely doesn't

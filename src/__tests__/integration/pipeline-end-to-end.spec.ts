@@ -1,6 +1,7 @@
 import {Application, BindingScope} from '@loopback/core';
 import {randomBytes} from 'node:crypto';
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -320,10 +321,8 @@ describe('Pipeline end-to-end', () => {
       );
       expect(existsSync(join(ROOT, '_meta', 'emitter.schema.json'))).toBe(true);
 
-      // Stage 6 persists the diff-state cache.
-      expect(
-        existsSync(join(ROOT, '.loopback', 'cache', 'diff-state.json')),
-      ).toBe(true);
+      // Stage 6's baseline is written after a successful codegen.
+      expect(existsSync(join(ROOT, 'contracts.lock.json'))).toBe(true);
     } finally {
       await app.stop();
     }
@@ -571,5 +570,78 @@ describe('Pipeline end-to-end — stage 8 tsc gate', () => {
     }
     // `npx tsc` cold start plus the full project type-check against real
     // @loopback packages takes well over the suite-wide 30s default.
+  }, 120_000);
+
+  it('honours outputDir: models + sidecars move, cross-bucket imports compile', async () => {
+    // Same fixture, relocated models directory. Repositories and
+    // controllers stay under `src/` and must import the base models from
+    // `src/generated`; stage 8 fails if any import still says `../models`.
+    const root = `${ROOT_TSC}-outdir`;
+    mkdirSync(root, {recursive: true});
+    for (const entry of [
+      'schemas',
+      'configs',
+      'datasources.json',
+      'tsconfig.json',
+    ]) {
+      cpSync(join(ROOT_TSC, entry), join(root, entry), {recursive: true});
+    }
+    symlinkSync(
+      join(PROJECT_ROOT, 'node_modules'),
+      join(root, 'node_modules'),
+      'dir',
+    );
+    const config: LoopbackConfigJson = {
+      ...TSC_CONFIG,
+      outputDir: 'src/generated',
+    };
+    const app = await bootstrap(root, config);
+    try {
+      const pipeline = await app.get<Pipeline>(
+        ContractsEngineBindings.PIPELINE,
+      );
+      const result = await pipeline.run({
+        projectRoot: root,
+        config: {...config, schemas: [join(root, 'schemas')]},
+        emitFlags: {
+          zod: true,
+          types: true,
+          model: true,
+          repository: true,
+          controller: true,
+          datasource: true,
+        },
+        skipTsc: false,
+      });
+      expect(result.tscOk).toBe(true);
+
+      const generated = join(root, 'src', 'generated');
+      for (const file of [
+        'customer.base.model.ts',
+        'customer.model.ts',
+        'order.base.model.ts',
+        'customer-v1.zod.ts',
+        'customer-v1.types.ts',
+        'index.ts',
+      ]) {
+        expect(existsSync(join(generated, file))).toBe(true);
+      }
+      expect(existsSync(join(root, 'src', 'models'))).toBe(false);
+      expect(
+        readFileSync(
+          join(root, 'src', 'repositories', 'order.base.repository.ts'),
+          'utf8',
+        ),
+      ).toContain("from '../generated/order.base.model'");
+      expect(
+        readFileSync(
+          join(root, 'src', 'controllers', 'order.base.controller.ts'),
+          'utf8',
+        ),
+      ).toContain("from '../generated/order.base.model'");
+    } finally {
+      await app.stop();
+      rmSync(root, {recursive: true, force: true});
+    }
   }, 120_000);
 });

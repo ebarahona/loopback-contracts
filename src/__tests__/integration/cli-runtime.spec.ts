@@ -353,7 +353,7 @@ describe('lb-contracts contract — SourceExtension discovery', () => {
 // under the public token, and invokes the 8-stage pipeline. Exercising
 // it through the CLI adapter (rather than through a hand-wired Application
 // as in `pipeline-end-to-end.spec.ts`) adds regression coverage for the
-// boot order Criticals #1/#2 hide behind.
+// boot order critical items #1/#2 hide behind.
 // ---------------------------------------------------------------------------
 
 describe('lb-contracts gen — CLI surface boot order', () => {

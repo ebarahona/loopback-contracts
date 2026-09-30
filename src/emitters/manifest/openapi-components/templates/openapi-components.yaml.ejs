@@ -1,18 +1,29 @@
 <%
 // Hand-rendered YAML for a single OAS 3.x `components.schemas.<Name>`
 // fragment. Locals from ManifestBackedEmitter: `schema` (raw JSONSchema),
-// `className` (PascalCase from schema $id stem), `schemaId`.
+// `className` (PascalCase from schema $id stem), `resolveRef(ref, base)`
+// (a `$ref` resolved the way pipeline stage 4 does), `lossy` (the run's
+// lossy reporter), `schemaId`.
 //
-// Projection rules applied here (the old code emitter ran these in TS
-// before handing the projected schema to the template; the manifest path
-// gives templates the raw schema so the same logic is inlined):
+// Projection rules applied here:
 //   - Strip top-level `$id` / `$schema` (OAS keys components by the map key).
 //   - Inject `type: 'object'` when the schema declares `properties` without
 //     an explicit `type` — OAS 3.1 resolvers expect it.
-//   - Rewrite cross-document `$ref` strings (`'customer.v1'`) into the
-//     `'#/components/schemas/Customer'` form OAS resolvers expect.
-//   - Strip a trailing `.vN` segment from the component name + ref targets,
-//     so `user.v1` keys as `User` (the file path carries the version).
+//   - A `$ref` to a whole loaded schema (`money`, `customer.v1`, a URL `$id`,
+//     or `#` for this schema) becomes `#/components/schemas/<Component>`,
+//     where `<Component>` is the name that schema's own fragment is keyed by.
+//   - A `$ref` with a JSON Pointer fragment (`#/$defs/status`,
+//     `money#/$defs/amount`) is inlined from the target document, the same
+//     rule the zod and types emitters apply; refs inside the inlined
+//     subschema resolve against its own document. Root `$defs` /
+//     `definitions` are therefore dropped: every use is inlined, and a
+//     `#/$defs/...` pointer would resolve against the OpenAPI document, not
+//     the component. A fragment that recurses into itself cannot be inlined;
+//     that occurrence becomes `{}` and the lossy feature
+//     `recursive-fragment-$ref` is reported.
+//   - A `$ref` no loaded schema satisfies (an external URL) passes through.
+//   - Strip a trailing `.vN` segment from plain-id component names, so
+//     `user.v1` keys as `User` (the file path carries the version).
 //
 // Mounted by the engine's FileWriter under a `#` header comment so the
 // whole file stays a valid YAML document.
@@ -29,28 +40,86 @@ function toPascalLocal(s) {
     .join('');
 }
 
-function rewriteRef(ref) {
-  if (ref.startsWith('#')) return ref;
-  if (/^[a-z]+:\/\//i.test(ref)) return ref;
-  const hashIdx = ref.indexOf('#');
-  const id = hashIdx === -1 ? ref : ref.slice(0, hashIdx);
-  const fragment = hashIdx === -1 ? '' : ref.slice(hashIdx);
-  const headId = stripVersionSuffix(id);
-  return '#/components/schemas/' + toPascalLocal(headId) + fragment;
+function isPlainId(id) {
+  return /^[A-Za-z][A-Za-z0-9._-]*$/.test(id);
 }
 
-function projectOAS(node, isTopLevel) {
-  if (Array.isArray(node)) return node.map(child => projectOAS(child, false));
+// Component name: strip trailing `.vN` from a plain `$id` so cross-version
+// siblings (`user.v1` / `user.v2`) collapse to the same component key under
+// OAS, with the file path carrying the version. URL-style ids use the
+// emitter's `className` (the schema `title` or the last non-version `$id`
+// segment).
+function componentNameFor(id, fallback) {
+  return isPlainId(id) ? toPascalLocal(stripVersionSuffix(id)) : fallback;
+}
+
+const componentName = componentNameFor(schemaId, className);
+
+// `<doc id>#<pointer>` of fragments currently being inlined.
+const inlining = new Set();
+
+function escapePointerSegment(seg) {
+  return String(seg).replace(/~/g, '~0').replace(/\//g, '~1');
+}
+
+function reportRecursiveFragment(ref, path) {
+  lossy.report({
+    feature: 'recursive-fragment-$ref',
+    source: {
+      schemaId: schemaId,
+      propertyPath: path.map(seg => '/' + escapePointerSegment(seg)).join(''),
+    },
+    severity: 'warn',
+    message: "$ref '" + ref + "' recurses into itself; fragment refs are " +
+      'inlined, so the recursive occurrence is emitted as {}.',
+    workaround:
+      'Move the recursive shape into its own schema file and $ref it by $id.',
+  });
+}
+
+function projectRef(node, document, path) {
+  const ref = node.$ref;
+  const siblings = {};
+  for (const key of Object.keys(node)) {
+    if (key !== '$ref') siblings[key] = projectOAS(node[key], document, false, path.concat(key));
+  }
+  const hit = resolveRef(ref, document);
+  if (hit === undefined) return Object.assign({$ref: ref}, siblings);
+  if (hit.pointer === '') {
+    const name = componentNameFor(hit.id, hit.className);
+    return Object.assign({$ref: '#/components/schemas/' + name}, siblings);
+  }
+  if (hit.target === undefined) return Object.assign({$ref: ref}, siblings);
+  const key = hit.id + '#' + hit.pointer;
+  let inlined;
+  if (inlining.has(key)) {
+    reportRecursiveFragment(ref, path);
+    inlined = {};
+  } else {
+    inlining.add(key);
+    try {
+      inlined = projectOAS(hit.target, hit.document, false, path);
+    } finally {
+      inlining.delete(key);
+    }
+  }
+  if (Object.keys(siblings).length === 0) return inlined;
+  // 2020-12 applies `$ref` siblings alongside the target; keep both.
+  const allOf = [inlined].concat(Array.isArray(siblings.allOf) ? siblings.allOf : []);
+  return Object.assign({}, siblings, {allOf: allOf});
+}
+
+function projectOAS(node, document, isTopLevel, path) {
+  if (Array.isArray(node)) {
+    return node.map((child, i) => projectOAS(child, document, false, path.concat(String(i))));
+  }
   if (node === null || typeof node !== 'object') return node;
+  if (typeof node.$ref === 'string') return projectRef(node, document, path);
   const out = {};
   for (const key of Object.keys(node)) {
-    const value = node[key];
     if (isTopLevel && (key === '$id' || key === '$schema')) continue;
-    if (key === '$ref' && typeof value === 'string') {
-      out[key] = rewriteRef(value);
-      continue;
-    }
-    out[key] = projectOAS(value, false);
+    if (isTopLevel && (key === '$defs' || key === 'definitions')) continue;
+    out[key] = projectOAS(node[key], document, false, path.concat(key));
   }
   if (node.type === undefined && node.properties !== undefined) {
     out.type = 'object';
@@ -58,16 +127,19 @@ function projectOAS(node, isTopLevel) {
   return out;
 }
 
-// Component name: strip trailing `.vN` from the source $id stem so cross-
-// version siblings (`user.v1` / `user.v2`) collapse to the same component
-// key under OAS, with the file path carrying the version.
-const componentName = toPascalLocal(stripVersionSuffix(schemaId));
-const projected = projectOAS(schema, true);
+const projected = projectOAS(schema, schema, true, []);
 
 function indent(n) { return '  '.repeat(n); }
 
 function isScalar(v) {
   return v === null || ['string','number','boolean'].includes(typeof v);
+}
+
+// Values rendered on the key's own line: scalars and the empty `{}` / `[]`
+// flow collections (which need the `: ` separator like a scalar).
+function isInline(v) {
+  if (v === undefined || isScalar(v)) return true;
+  return Array.isArray(v) ? v.length === 0 : Object.keys(v).length === 0;
 }
 
 function yamlScalar(v) {
@@ -99,7 +171,7 @@ function yamlValue(v, depth) {
   if (keys.length === 0) return '{}';
   return '\n' + keys.map(k => {
     const child = v[k];
-    if (isScalar(child)) return indent(depth) + yamlScalar(k) + ': ' + yamlScalar(child);
+    if (isInline(child)) return indent(depth) + yamlScalar(k) + ': ' + yamlValue(child, depth + 1);
     return indent(depth) + yamlScalar(k) + ':' + yamlValue(child, depth + 1);
   }).join('\n');
 }
@@ -114,9 +186,8 @@ function yamlInline(v, depth) {
   return keys.map((k, i) => {
     const child = v[k];
     const prefix = i === 0 ? '' : indent(depth);
-    const sep = isScalar(child) ? ' ' : '';
-    return prefix + yamlScalar(k) + ':' + sep
-      + (isScalar(child) ? yamlScalar(child) : yamlValue(child, depth + 1));
+    const sep = isInline(child) ? ' ' : '';
+    return prefix + yamlScalar(k) + ':' + sep + yamlValue(child, depth + 1);
   }).join('\n');
 }
 -%>
