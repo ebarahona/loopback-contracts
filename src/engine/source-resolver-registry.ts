@@ -115,6 +115,18 @@ export class SourceResolverRegistry {
 }
 
 /**
+ * Report whether a schema-source descriptor names a local directory (a
+ * bare path, no `<scheme>:` prefix) rather than a remote source.
+ *
+ * @internal
+ */
+export function isLocalSourceDescriptor(
+  descriptor: SchemaSourceDescriptor,
+): boolean {
+  return detectScheme(descriptor) === LOCAL_SCHEME;
+}
+
+/**
  * Pick the scheme prefix from a descriptor. Recognises `<scheme>:`
  * (case-insensitive); `git+ssh://…` and `git+https://…` both fold to
  * `git+`; a bare path returns the `local` pseudo-scheme.

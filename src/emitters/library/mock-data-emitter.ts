@@ -5,6 +5,7 @@ import {
   ContractsCodegenError,
   ContractsPeerDepMissingError,
   ContractsValidationError,
+  schemaNameStems,
   toKebab,
 } from '../../helpers';
 import type {
@@ -99,7 +100,10 @@ export class MockDataEmitter implements ProjectionEmitter<MockDataPerSchemaOptio
     const options = this.validateOptions(ctx.options);
     const faker = loadJsonSchemaFaker();
     const schemaId = typeof ctx.schema.$id === 'string' ? ctx.schema.$id : '';
-    const fileBase = toKebab(schemaId || 'fixture');
+    const fileBase = toKebab(
+      schemaNameStems(ctx.schema, 'full', 'fixture', ctx.registry.list())
+        .fileStem,
+    );
     const count = Math.max(1, options.count ?? DEFAULT_COUNT);
     const seed = typeof options.seed === 'number' ? options.seed : undefined;
 

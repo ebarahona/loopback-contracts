@@ -237,7 +237,16 @@ export class EmitterRunner {
         }
 
         for (const file of produced) {
-          output.push(stampProducer(file, emitter.kind));
+          output.push(
+            stampProducer(
+              file,
+              emitter.kind,
+              emitter.outputScope !== 'per-project' &&
+                typeof schema.$id === 'string'
+                ? schema.$id
+                : undefined,
+            ),
+          );
         }
       }
     }
@@ -366,9 +375,19 @@ function sortEmitters(
 // Tag each EmittedFile with the producing emitter's kind so the FileWriter
 // can name both sides of a collision in its diagnostic. Honor the emitter's
 // own `producer` value if it explicitly set one.
-function stampProducer(file: EmittedFile, kind: string): EmittedFile {
-  if (file.producer !== undefined) return file;
-  return {...file, producer: kind};
+function stampProducer(
+  file: EmittedFile,
+  kind: string,
+  schemaId: string | undefined,
+): EmittedFile {
+  const needsProducer = file.producer === undefined;
+  const needsSchemaId = file.schemaId === undefined && schemaId !== undefined;
+  if (!needsProducer && !needsSchemaId) return file;
+  return {
+    ...file,
+    ...(needsProducer ? {producer: kind} : {}),
+    ...(needsSchemaId ? {schemaId} : {}),
+  };
 }
 
 /**

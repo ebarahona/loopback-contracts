@@ -177,6 +177,15 @@ export interface EmittedFile {
    * this field; the engine treats a missing value as `'<unknown>'`.
    */
   readonly producer?: string;
+  /**
+   * Optional `$id` of the schema this descriptor was emitted for. The
+   * engine stamps it on every per-schema emitter's output when the emitter
+   * leaves it unset; the file writer names both schemas when two
+   * descriptors target the same path.
+   *
+   * @experimental
+   */
+  readonly schemaId?: string;
 }
 
 /**
@@ -272,9 +281,20 @@ export interface TemplateEngine {
  */
 export interface ProjectPaths {
   readonly root: string;
+  /** Root every {@link EmittedFile.path} is relative to (`<root>/src`). */
   readonly outputDir: string;
   readonly schemasDir: string;
   readonly configsDir: string;
+  /**
+   * Absolute directory the engine writes the `models/` bucket to (every
+   * emitted path that starts with `models/`), from `loopback.config.json`
+   * `outputDir` or `lb-contracts gen --out-dir`. Absent means the default
+   * `<outputDir>/models`. Emitters keep emitting `models/...` paths; code
+   * that imports across buckets computes the relative specifier from this.
+   *
+   * @experimental
+   */
+  readonly modelsDir?: string;
 }
 
 /**

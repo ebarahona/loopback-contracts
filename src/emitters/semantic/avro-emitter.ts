@@ -1,7 +1,12 @@
 import {BindingScope, injectable} from '@loopback/core';
 import type {ValidateFunction} from 'ajv';
 import Ajv2020 from 'ajv/dist/2020';
-import {ContractsValidationError, toKebab, toPascal} from '../../helpers';
+import {
+  ContractsValidationError,
+  schemaNameStems,
+  toKebab,
+  toPascal,
+} from '../../helpers';
 import type {
   EmittedFile,
   EmitterContext,
@@ -118,8 +123,14 @@ export class AvroEmitter implements ProjectionEmitter<AvroPerSchemaOptions> {
   emit(ctx: EmitterContext<AvroPerSchemaOptions>): EmittedFile[] {
     const options = this.validateOptions(ctx.options);
     const schemaId = typeof ctx.schema.$id === 'string' ? ctx.schema.$id : '';
-    const recordName = toPascal(schemaId || 'Record');
-    const fileBase = toKebab(schemaId || 'record');
+    const {typeStem, fileStem} = schemaNameStems(
+      ctx.schema,
+      'full',
+      '',
+      ctx.registry.list(),
+    );
+    const recordName = toPascal(typeStem || 'Record');
+    const fileBase = toKebab(fileStem || 'record');
     const namespace = options.namespace ?? DEFAULT_NAMESPACE;
 
     const convertCtx: ConvertContext = {
@@ -377,9 +388,8 @@ function resolveRef(
     return 'string';
   }
   const targetName = toPascal(
-    typeof target.$id === 'string' && target.$id.length > 0
-      ? target.$id
-      : fieldName,
+    schemaNameStems(target, 'full', fieldName, convertCtx.registry.list())
+      .typeStem,
   );
   convertCtx.visited.set(lookupKey, targetName);
   const fields = buildFields(target, convertCtx);

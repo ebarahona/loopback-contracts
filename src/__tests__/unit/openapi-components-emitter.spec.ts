@@ -144,3 +144,198 @@ describe('openapi-components manifest emitter', () => {
     );
   });
 });
+
+describe('openapi-components naming for URL-style $id', () => {
+  const ADDRESS: JSONSchema = {
+    $id: 'https://schemas.example.com/address/1.0.0',
+    title: 'Address',
+    type: 'object',
+    properties: {zip: {type: 'string'}},
+  };
+  const INTAKE: JSONSchema = {
+    $id: 'https://schemas.example.com/intake/1.0.0',
+    title: 'AppraisalIntake',
+    type: 'object',
+    properties: {
+      home: {$ref: 'https://schemas.example.com/address/1.0.0'},
+      work: {$ref: '../address/1.0.0'},
+      other: {$ref: 'https://elsewhere.example.com/x'},
+    },
+  };
+
+  it('writes a slug file name and keys the component by title', async () => {
+    const byId = new Map([ADDRESS, INTAKE].map(s => [s.$id as string, s]));
+    const ctx: EmitterContext = {
+      ...buildContext(INTAKE),
+      registry: {
+        get: id => byId.get(id),
+        list: () => [...byId.values()],
+        has: id => byId.has(id),
+      },
+    };
+    const [file] = await emitter.emit(ctx);
+    expect(file?.path).toBe('models/intake-1-0-0.openapi-components.yaml');
+
+    const doc = parseYaml(file?.content ?? '') as {
+      components: {schemas: Record<string, JSONSchema>};
+    };
+    const component = doc.components.schemas['AppraisalIntake'];
+    expect(component).toBeDefined();
+    // Loaded targets key on their component name, whichever way they are
+    // referenced; refs outside the run pass through.
+    expect(component?.properties?.['home']?.['$ref']).toBe(
+      '#/components/schemas/Address',
+    );
+    expect(component?.properties?.['work']?.['$ref']).toBe(
+      '#/components/schemas/Address',
+    );
+    expect(component?.properties?.['other']?.['$ref']).toBe(
+      'https://elsewhere.example.com/x',
+    );
+  });
+});
+
+describe('openapi-components $ref and $defs projection', () => {
+  const MONEY: JSONSchema = {
+    $id: 'money',
+    type: 'object',
+    properties: {
+      amount: {$ref: '#/$defs/amount'},
+      currency: {$ref: '#/$defs/currency'},
+    },
+    required: ['amount', 'currency'],
+    $defs: {
+      amount: {type: 'number', minimum: 0},
+      currency: {type: 'string', enum: ['USD', 'EUR']},
+      // Only reachable through a fragment ref from another schema; its own
+      // local ref must resolve against `money`, not the referrer.
+      price: {
+        type: 'object',
+        properties: {value: {$ref: '#/$defs/amount'}},
+      },
+    },
+  };
+  const INTAKE: JSONSchema = {
+    $id: 'appraisal-intake',
+    type: 'object',
+    properties: {
+      faceValue: {$ref: 'money#/$defs/amount'},
+      price: {$ref: 'money#/$defs/price'},
+      premiums: {type: 'array', items: {$ref: 'money'}, minItems: 1},
+      status: {$ref: '#/$defs/status', description: 'Lifecycle state'},
+      parent: {$ref: '#'},
+    },
+    required: ['faceValue', 'status'],
+    $defs: {status: {type: 'string', enum: ['draft', 'submitted']}},
+  };
+
+  async function emitAll(schemas: JSONSchema[]): Promise<{
+    doc: {components: {schemas: Record<string, JSONSchema>}};
+    lossy: string[];
+  }> {
+    const byId = new Map(schemas.map(s => [s.$id as string, s]));
+    const registry = {
+      get: (id: string) => byId.get(id),
+      list: () => [...byId.values()],
+      has: (id: string) => byId.has(id),
+    };
+    const lossy: string[] = [];
+    const merged: Record<string, JSONSchema> = {};
+    for (const schema of schemas) {
+      const [file] = await emitter.emit({
+        ...buildContext(schema),
+        registry,
+        lossy: {report: r => lossy.push(r.feature), entries: () => []},
+      });
+      const part = parseYaml(file?.content ?? '') as {
+        components: {schemas: Record<string, JSONSchema>};
+      };
+      Object.assign(merged, part.components.schemas);
+    }
+    return {doc: {components: {schemas: merged}}, lossy};
+  }
+
+  // Every `$ref` in the mounted document, and whether it resolves.
+  function collectRefs(doc: object): {ref: string; ok: boolean}[] {
+    const out: {ref: string; ok: boolean}[] = [];
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (node === null || typeof node !== 'object') return;
+      for (const [key, value] of Object.entries(node)) {
+        if (key === '$ref' && typeof value === 'string') {
+          let cur: unknown = doc;
+          const ok =
+            value.startsWith('#/') &&
+            value
+              .slice(2)
+              .split('/')
+              .every(seg => {
+                cur = (cur as Record<string, unknown> | undefined)?.[seg];
+                return cur !== undefined;
+              });
+          out.push({ref: value, ok});
+        } else {
+          walk(value);
+        }
+      }
+    };
+    walk(doc);
+    return out;
+  }
+
+  it('emits only refs that resolve inside the mounted components', async () => {
+    const {doc, lossy} = await emitAll([MONEY, INTAKE]);
+    expect(lossy).toEqual([]);
+    const refs = collectRefs(doc);
+    expect(refs.filter(r => !r.ok)).toEqual([]);
+    expect(refs.map(r => r.ref).sort()).toEqual([
+      '#/components/schemas/AppraisalIntake',
+      '#/components/schemas/Money',
+    ]);
+    expect(JSON.stringify(doc)).not.toContain('$defs');
+  });
+
+  it('inlines $defs fragments, local and cross-schema', async () => {
+    const {doc} = await emitAll([MONEY, INTAKE]);
+    const intake = doc.components.schemas['AppraisalIntake'];
+    const props = intake?.properties ?? {};
+    expect(props['faceValue']).toEqual({type: 'number', minimum: 0});
+    // A ref inside an inlined fragment resolves against its own document.
+    expect(props['price']).toEqual({
+      type: 'object',
+      properties: {value: {type: 'number', minimum: 0}},
+    });
+    // Annotation siblings survive next to the inlined target.
+    expect(props['status']).toEqual({
+      description: 'Lifecycle state',
+      allOf: [{type: 'string', enum: ['draft', 'submitted']}],
+    });
+    expect(props['premiums']?.items).toEqual({
+      $ref: '#/components/schemas/Money',
+    });
+    expect(props['parent']).toEqual({
+      $ref: '#/components/schemas/AppraisalIntake',
+    });
+    expect(doc.components.schemas['Money']?.properties?.['currency']).toEqual({
+      type: 'string',
+      enum: ['USD', 'EUR'],
+    });
+  });
+
+  it('reports a self-recursive fragment instead of looping', async () => {
+    const tree: JSONSchema = {
+      $id: 'tree',
+      type: 'object',
+      properties: {root: {$ref: '#/$defs/node'}},
+      $defs: {
+        node: {type: 'object', properties: {child: {$ref: '#/$defs/node'}}},
+      },
+    };
+    const {doc, lossy} = await emitAll([tree]);
+    expect(lossy).toEqual(['recursive-fragment-$ref']);
+    expect(doc.components.schemas['Tree']?.properties?.['root']).toEqual({
+      type: 'object',
+      properties: {child: {}},
+    });
+  });
+});

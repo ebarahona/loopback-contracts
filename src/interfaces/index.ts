@@ -27,6 +27,7 @@ export type {
 } from './emitter-context.interface';
 
 export type {
+  BaselineConfig,
   EmitValue,
   LoopbackConfigJson,
   MigrationStrategy,

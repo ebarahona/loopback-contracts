@@ -5,6 +5,7 @@ import {
   ContractsCodegenError,
   ContractsPeerDepMissingError,
   ContractsValidationError,
+  schemaNameStems,
   splitWords,
   toKebab,
   toPascal,
@@ -104,9 +105,15 @@ export class ProtoEmitter implements ProjectionEmitter<ProtoPerSchemaOptions> {
 
     const quicktype = loadQuicktypeCore();
     const schemaId = typeof ctx.schema.$id === 'string' ? ctx.schema.$id : '';
-    const messageName = toPascal(schemaId || 'Message');
-    const fileBase = toKebab(schemaId || 'message');
-    const pkg = options.package ?? toSnake(schemaId || 'contracts');
+    const {typeStem, fileStem} = schemaNameStems(
+      ctx.schema,
+      'full',
+      '',
+      ctx.registry.list(),
+    );
+    const messageName = toPascal(typeStem || 'Message');
+    const fileBase = toKebab(fileStem || 'message');
+    const pkg = options.package ?? toSnake(fileStem || 'contracts');
 
     let proto: string;
     try {

@@ -316,7 +316,7 @@ export class FileWriter {
     files: readonly EmittedFile[],
     perFileRoots?: ReadonlyMap<string, string>,
   ): ResolvedFile[] {
-    const seen = new Map<string, string>(); // absPath -> producer label
+    const seen = new Map<string, EmittedFile>(); // absPath -> first descriptor
     const resolved: ResolvedFile[] = [];
 
     for (const file of files) {
@@ -325,20 +325,25 @@ export class FileWriter {
       const effectiveRoot = fileRoot !== undefined ? resolve(fileRoot) : root;
       const absPath = join(effectiveRoot, relPath);
 
-      if (seen.has(absPath)) {
-        const first = seen.get(absPath) ?? '<unknown>';
-        const second = file.producer ?? '<unknown>';
+      const prior = seen.get(absPath);
+      if (prior !== undefined) {
+        const first = describeOrigin(prior);
+        const second = describeOrigin(file);
+        const sameEmitter = prior.producer === file.producer;
         throw new ContractsCodegenError(
           `Two emitters target the same output path '${relPath}': ` +
-            `'${first}' and '${second}'. Rename one or change its outputSuffix.`,
+            `${first} and ${second}. ` +
+            (sameEmitter
+              ? 'Their `$id`s map to the same file name; rename one `$id`.'
+              : 'Rename one or change its outputSuffix.'),
           {
-            emitterKind: second,
-            schemaId: '<unknown>',
+            emitterKind: file.producer ?? '<unknown>',
+            schemaId: file.schemaId ?? prior.schemaId ?? '<unknown>',
             outputPath: absPath,
           },
         );
       }
-      seen.set(absPath, file.producer ?? '<unknown>');
+      seen.set(absPath, file);
 
       const withHeader = applyHeader(relPath, file);
       const bytes =
@@ -462,4 +467,13 @@ function defaultHeaderFor(ext: string): string | undefined {
 
 function ensureTrailingNewline(s: string): string {
   return s.endsWith('\n') ? s : `${s}\n`;
+}
+
+// `'zod-emitter' (schema 'https://a.example.com/x/address')` for the
+// output-path collision diagnostic.
+function describeOrigin(file: EmittedFile): string {
+  const producer = `'${file.producer ?? '<unknown>'}'`;
+  return file.schemaId === undefined
+    ? producer
+    : `${producer} (schema '${file.schemaId}')`;
 }

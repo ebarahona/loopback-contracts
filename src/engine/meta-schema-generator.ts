@@ -320,6 +320,16 @@ export function buildLoopbackConfigMetaSchema(
       name: {type: 'string', minLength: 1},
       schemasDir: {type: 'string', minLength: 1},
       configsDir: {type: 'string', minLength: 1},
+      outputDir: {
+        type: 'string',
+        minLength: 1,
+        default: 'src/models',
+        description:
+          'Directory (relative to the project root, inside it) that ' +
+          'receives model-scoped output: `.base.model.ts` / `.model.ts` ' +
+          'and every sidecar (zod, types, openapi-components, ...). ' +
+          'Overridden by `lb-contracts gen --out-dir`.',
+      },
       validator: {type: 'string', enum: ['ajv', 'zod']},
       schemas: {type: 'array', items: {type: 'string'}},
       emit: {
@@ -362,6 +372,28 @@ export function buildLoopbackConfigMetaSchema(
           properties: {
             mode: {type: 'string', enum: ['allow', 'fail']},
             note: {type: 'string'},
+          },
+        },
+      },
+      // Stage-6 baseline settings — see `BaselineConfig` in
+      // `loopback-config.interface.ts`. Closed so a typo fails stage 5.
+      baseline: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          enabled: {
+            type: 'boolean',
+            default: true,
+            description:
+              'Run the stage-6 breaking-change gate against ' +
+              '`contracts.lock.json` and keep the file up to date.',
+          },
+          includeRemote: {
+            type: 'boolean',
+            default: false,
+            description:
+              'Store full bodies of remote-source schemas in ' +
+              '`contracts.lock.json` instead of only a content digest.',
           },
         },
       },

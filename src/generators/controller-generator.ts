@@ -3,6 +3,7 @@ import {join, posix} from 'node:path';
 import {
   ContractsValidationError,
   assertNoTraversal,
+  modelsImportPrefix,
   resolveIdProperty,
   toKebab,
   toPascal,
@@ -148,6 +149,7 @@ export class ControllerGenerator implements ProjectionEmitter {
       isPublic: config.public === true,
       idProperty,
       idType_: idType,
+      modelsImportDir: modelsImportPrefix(ctx.paths, 'controllers'),
     });
 
     const basePath = posix.join('controllers', `${kebab}.base.controller.ts`);

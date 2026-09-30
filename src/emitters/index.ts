@@ -16,3 +16,5 @@ export {GraphQLEmitter} from './semantic/graphql-emitter';
 export {AsyncAPIEmitter} from './semantic/asyncapi-emitter';
 export {ProtoEmitter} from './semantic/proto-emitter';
 export {AvroEmitter} from './semantic/avro-emitter';
+export {MongoDbEmitter} from './semantic/mongodb-emitter';
+export type {MongoDbPerSchemaOptions} from './semantic/mongodb-emitter';

@@ -297,6 +297,7 @@ const CONTROLLER_VIEW = {
   isPublic: true,
   idProperty: 'id',
   idType_: 'string',
+  modelsImportDir: '../models',
 };
 
 /** Datasource fixture: simplest of the four; no conditional import branches. */

@@ -2,7 +2,12 @@ import {BindingScope, injectable} from '@loopback/core';
 import type {ValidateFunction} from 'ajv';
 import Ajv2020 from 'ajv/dist/2020';
 import {resolve} from 'node:path';
-import {ContractsValidationError, toKebab, toPascal} from '../../helpers';
+import {
+  ContractsValidationError,
+  schemaNameStems,
+  toKebab,
+  toPascal,
+} from '../../helpers';
 import type {
   EmittedFile,
   EmitterContext,
@@ -210,11 +215,6 @@ function jsonSchemaToGqlType(
   }
 }
 
-function deriveName(schema: JSONSchema): string {
-  const id = typeof schema.$id === 'string' ? schema.$id : 'Anonymous';
-  return id.replace(/\.v\d+$/, '');
-}
-
 /**
  * `@experimental` projection emitter producing code-first GraphQL decorators
  * (Type-GraphQL-style `@ObjectType` / `@Field`) for every source schema, with
@@ -272,9 +272,14 @@ export class GraphQLEmitter implements ProjectionEmitter<GraphQLPerSchemaOptions
   emit(ctx: EmitterContext<GraphQLPerSchemaOptions>): EmittedFile[] {
     const {schema, templates} = ctx;
     const options = this.validateOptions(ctx.options);
-    const baseName = deriveName(schema);
-    const Name = toPascal(baseName);
-    const kebab = toKebab(baseName);
+    const {typeStem, fileStem} = schemaNameStems(
+      schema,
+      'strip-version',
+      'Anonymous',
+      ctx.registry.list(),
+    );
+    const Name = toPascal(typeStem);
+    const kebab = toKebab(fileStem);
 
     const mapCtx: GqlMapContext = {
       scalars: options.scalars,

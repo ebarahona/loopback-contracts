@@ -14,6 +14,7 @@
 import {Application} from '@loopback/core';
 import {
   ContractsCodegenError,
+  placeModelOutputs,
   readDatasourcesDoc,
   readJsoncStrict,
 } from '../../helpers';
@@ -175,15 +176,18 @@ export async function runOverride(opts: {
       kebab,
       projectRoot: opts.projectRoot,
       paths,
+      modelsDir: projectPathsForBoot.modelsDir,
     });
 
-    // All generators emit `EmittedFile.path` relative to `outputDir`;
-    // anchor them via `DefaultProjectPaths.outputDir` so any future config
-    // override (e.g. an `outputDir` field) is honoured instead of being
-    // silently bypassed by a hardcoded `'src'` segment. Mirrors the
-    // `validate.ts` / `gen.ts` wiring.
-    const projectPaths = new DefaultProjectPaths(opts.projectRoot, opts.config);
-    const result = await writer.writeAll(projectPaths.outputDir, emitted);
+    // All generators emit `EmittedFile.path` relative to `outputDir`, with
+    // model files under the `models/` bucket; relocate that bucket to the
+    // configured `outputDir` (models directory) exactly as `gen` does.
+    const placed = placeModelOutputs(emitted, projectPathsForBoot);
+    const result = await writer.writeAll(
+      projectPathsForBoot.outputDir,
+      placed.files,
+      placed.perFileRoots,
+    );
 
     if (result.skipped.length > 0) {
       const skipped = result.skipped[0] ?? '<unknown>';
@@ -239,6 +243,7 @@ interface ProducerOpts {
   kebab: string;
   projectRoot: string;
   paths: {schemasDir: string; configsDir: string};
+  modelsDir: string;
 }
 
 /**
@@ -256,6 +261,7 @@ async function produceExtension(
     outputDir: resolve(opts.projectRoot, 'src'),
     schemasDir: opts.paths.schemasDir,
     configsDir: opts.paths.configsDir,
+    modelsDir: opts.modelsDir,
   };
   const registry = new InMemorySchemaRegistry();
   const lossy = new InMemoryLossyReporter();
@@ -294,11 +300,7 @@ async function produceExtension(
   // `registry.has(...)`). A throw here would surface a registry bug, not a
   // user-visible failure, so the strategy stays defensive.
   const importMap = new RelativeImportMap(registry, id => {
-    return resolve(
-      projectPaths.outputDir,
-      'models',
-      `${toKebab(id)}.base.model.ts`,
-    );
+    return resolve(opts.modelsDir, `${toKebab(id)}.base.model.ts`);
   });
 
   const ctx: GeneratorContext = {

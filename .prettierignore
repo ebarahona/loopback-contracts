@@ -1,0 +1,2 @@
+# Golden fixtures are byte-exact emitter output; formatting them breaks the comparison.
+src/__tests__/**/__golden__/

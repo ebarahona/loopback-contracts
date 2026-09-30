@@ -48,7 +48,7 @@ class DuplicateZodEmitter implements ProjectionEmitter {
 }
 
 describe('EmitterRegistry', () => {
-  it('lists every built-in emitter (9 sidecars + 4 lb4-idiom)', async () => {
+  it('lists every built-in emitter (10 sidecars + 4 lb4-idiom)', async () => {
     const app = await buildApp();
     const reg = await app.get<EmitterRegistry>(
       ContractsEngineBindings.EMITTER_REGISTRY,
@@ -63,6 +63,7 @@ describe('EmitterRegistry', () => {
         'cloudevents',
         'graphql',
         'mock-data',
+        'mongodb',
         'openapi-components',
         'proto',
         'types',
@@ -76,7 +77,7 @@ describe('EmitterRegistry', () => {
         'repository',
       ].sort(),
     );
-    expect(all).toHaveLength(13);
+    expect(all).toHaveLength(14);
   });
 
   it('byKind() returns the matching emitter or undefined', async () => {
@@ -137,7 +138,7 @@ describe('EmitterRegistry', () => {
       ContractsEngineBindings.EMITTER_REGISTRY,
     );
     const meta = await reg.listMetadata();
-    expect(meta).toHaveLength(13);
+    expect(meta).toHaveLength(14);
     for (const m of meta) {
       expect(typeof m.kind).toBe('string');
       expect(typeof m.outputSuffix).toBe('string');

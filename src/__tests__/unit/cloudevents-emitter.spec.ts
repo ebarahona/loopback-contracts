@@ -144,3 +144,31 @@ describe('cloudevents manifest emitter', () => {
     expect(files).toEqual([]);
   });
 });
+
+describe('cloudevents sidecar import', () => {
+  it('imports the payload type by the types emitter file and export name', async () => {
+    const [plain] = await emitter.emit(
+      buildContext({...FIXTURE_WITH_X, $id: 'appraisal-intake'}),
+    );
+    expect(plain?.content).toContain(
+      "import type {AppraisalIntake} from './appraisal-intake.types';",
+    );
+
+    const [versioned] = await emitter.emit(buildContext(FIXTURE_WITH_X));
+    expect(versioned?.content).toContain(
+      "import type {UserV1 as User} from './user-v1.types';",
+    );
+
+    const [url] = await emitter.emit(
+      buildContext({
+        ...FIXTURE_WITH_X,
+        $id: 'https://schemas.example.com/intake/1.0.0',
+        title: 'AppraisalIntake',
+      }),
+    );
+    expect(url?.path).toBe('models/intake-1-0-0.cloudevents.ts');
+    expect(url?.content).toContain(
+      "import type {AppraisalIntake} from './intake-1-0-0.types';",
+    );
+  });
+});

@@ -6,6 +6,7 @@
 // existing internal imports keep compiling.
 
 export type {
+  BaselineConfig,
   EmitValue,
   LoopbackConfigJson,
   MigrationStrategy,

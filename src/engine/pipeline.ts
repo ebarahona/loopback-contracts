@@ -6,10 +6,9 @@ import {
   injectable,
 } from '@loopback/core';
 import {execFile} from 'node:child_process';
-import {randomBytes} from 'node:crypto';
-import {mkdir, open, readdir, readFile, rename, unlink} from 'node:fs/promises';
+import {readdir, readFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
-import {dirname, join, resolve} from 'node:path';
+import {join, resolve} from 'node:path';
 import {promisify} from 'node:util';
 import Ajv2020 from 'ajv/dist/2020';
 import type {ErrorObject, ValidateFunction} from 'ajv';
@@ -20,7 +19,11 @@ import {
   ContractsPipelineError,
   ContractsSourceError,
   ContractsValidationError,
+  placeModelOutputs,
   readDatasourcesDoc,
+  resolveIdReference,
+  resolveRefTarget,
+  walkJsonPointer,
 } from '../helpers';
 import type {
   ContractsValidator,
@@ -51,11 +54,45 @@ import {
   buildModelConfigMetaSchema,
 } from './meta-schema-generator';
 import {InMemorySchemaRegistry} from './schema-registry';
-import {SourceResolverRegistry} from './source-resolver-registry';
+import {
+  BASELINE_FILENAME,
+  baselinePath,
+  classifySchemaChange,
+  loadBaseline,
+  ownEntry,
+  schemaDigest,
+  writeBaseline,
+  type SchemaBaseline,
+} from './schema-baseline';
+import {
+  isLocalSourceDescriptor,
+  SourceResolverRegistry,
+} from './source-resolver-registry';
 import {ContractsEngineBindings} from './tokens';
 
 const execFileAsync = promisify(execFile);
 const debug = createDebug('loopback:contracts:pipeline');
+
+/** Keywords whose values are instance data, never subschemas. */
+const DATA_KEYWORDS: ReadonlySet<string> = new Set([
+  'const',
+  'default',
+  'enum',
+  'examples',
+]);
+
+/** Keywords whose value maps names to subschemas. */
+const SCHEMA_MAP_KEYWORDS: ReadonlySet<string> = new Set([
+  '$defs',
+  'definitions',
+  'dependentSchemas',
+  'patternProperties',
+  'properties',
+]);
+
+function escapePointerToken(token: string): string {
+  return token.replace(/~/g, '~0').replace(/\//g, '~1');
+}
 
 /**
  * Input bundle the CLI hands {@link Pipeline.run}.
@@ -71,13 +108,16 @@ export interface PipelineRunOptions {
   readonly emitFlags: Record<string, boolean>;
   /** Promote `severity: 'error'` lossy reports to a stage failure. */
   readonly strict?: boolean;
-  /** Override the stage-6 breaking-change refusal. */
+  /**
+   * Accept stage-6 breaking changes against the `contracts.lock.json`
+   * baseline; the baseline is then updated after codegen succeeds.
+   */
   readonly allowBreaking?: boolean;
   /** Skip the stage-8 `tsc --noEmit` gate (for `--dry-run`). */
   readonly skipTsc?: boolean;
   /**
    * Stop after the validation chain (stages 1-6) and skip stages 7-8 plus
-   * the diff-state cache write. The returned {@link PipelineResult} has
+   * the `contracts.lock.json` baseline write. The returned {@link PipelineResult} has
    * `filesWritten: []` and `tscOk: true`. Used by `lb-contracts validate`.
    */
   readonly validateOnly?: boolean;
@@ -127,30 +167,6 @@ export interface PipelineResult {
 
 /** Numeric stage labels surfaced on thrown errors. */
 export type StageNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
-
-/** Cache file written under `.loopback/cache/diff-state.json`. */
-interface DiffStateCache {
-  readonly version: 1;
-  /** Keyed by `<descriptor-uri>@<schema-$id>`. */
-  readonly entries: Record<string, DiffStateEntry>;
-}
-
-/** One cached snapshot used by stage 6 to compute backward-compat diffs. */
-interface DiffStateEntry {
-  readonly descriptor: string;
-  readonly schemaId: string;
-  /**
-   * The opaque pin extracted from the descriptor (e.g., `#v1.2.0`,
-   * `?ref=sha`, the package version). Empty string for an unpinned
-   * descriptor.
-   */
-  readonly pin: string;
-  /** Canonical JSON of the schema at the time it was cached. */
-  readonly schemaJson: string;
-}
-
-/** Stage-6 classification verdict. */
-type DiffClassification = 'additive' | 'narrowing' | 'breaking' | 'unchanged';
 
 /**
  * Eight-stage validation + codegen pipeline. Owned by the engine; invoked
@@ -219,16 +235,12 @@ export class Pipeline {
   private writeQueue: EmittedFile[] = [];
 
   /**
-   * Per-run map of `schema $id` -\> the originating descriptor (the entry
-   * from `loopback.config.json.schemas[]` that produced it). Populated in
-   * stage 2 after the schema has been validated and its `$id` extracted,
-   * and consumed in stage 6 so the diff iterates `N` schemas instead of
-   * the `N × M` Cartesian over every descriptor. Reset at the top of every
-   * {@link run} call. Cached and queried by schemaId; a second descriptor
-   * producing the same `$id` overrides (stage 3's dedupe already enforces
-   * content-equality so the descriptor choice is informational only).
+   * `$id`s of the schemas loaded from a local (bare-path) source in the
+   * current run. Stage 6 stores their full body in `contracts.lock.json`;
+   * remote-source schemas are recorded by digest unless
+   * `baseline.includeRemote` is set. Reset at the top of every {@link run}.
    */
-  private readonly schemaOrigins = new Map<string, string>();
+  private localSchemaIds = new Set<string>();
 
   /**
    * Lazily-constructed Ajv2020 instance used by stages 2 and 5. Building
@@ -319,7 +331,7 @@ export class Pipeline {
     this.lossy.clear();
     this.configs._reset();
     this.writeQueue = [];
-    this.schemaOrigins.clear();
+    this.localSchemaIds = new Set();
     const maxStage: StageNumber = opts.maxStage ?? 8;
 
     const fetched = await this.stage1Fetch(opts);
@@ -342,12 +354,12 @@ export class Pipeline {
     stagesRun = 5;
     if (maxStage <= 5) return this.summarise(stagesRun);
 
-    const nextDiffState = await this.stage6DiffBreakingChanges(opts);
+    const baseline = await this.stage6DiffBreakingChanges(opts);
     stagesRun = 6;
     if (maxStage <= 6) return this.summarise(stagesRun);
 
-    // `--validate-only` short-circuits before codegen and before any cache
-    // write so the command remains read-only.
+    // `--validate-only` short-circuits before codegen and before the
+    // baseline write so the command remains read-only.
     if (opts.validateOnly === true) return this.summarise(stagesRun);
 
     // Run any `pre`-stage validators contributed via
@@ -359,32 +371,17 @@ export class Pipeline {
     const writeResult = await this.stage7Codegen(opts);
     stagesRun = 7;
 
-    // Persist the updated diff-state cache only after codegen wrote files
-    // — a failed stage 7 must not advance the baseline. Wrapped in its
-    // own try/catch: a cache write hiccup (full disk, permission flip)
-    // must not surface as a stage-7 codegen error, since the source-of-
-    // truth artefacts have already landed successfully.
-    try {
-      await this.persistDiffStateCache(opts, nextDiffState);
-    } catch (err) {
-      // `source.schemaId` is an empty string because the failure is not
-      // attributable to any single schema — the diff-state cache is a
-      // pipeline-level artefact. The message names the affected
-      // subsystem so the report is still scannable.
-      this.lossy.report({
-        feature: 'diff-state-cache',
-        source: {schemaId: ''},
-        severity: 'warn',
-        message:
-          `diff-state-cache: failed to persist baseline ` +
-          `(${(err as Error).message}); next run will re-diff every ` +
-          `schema as if no baseline existed`,
-      });
-    }
+    // Advance the committed baseline (`contracts.lock.json`) only after
+    // codegen wrote files: a failed stage 7 must not accept the change.
+    const baselineWritten =
+      baseline !== undefined &&
+      (await writeBaseline(opts.projectRoot, baseline.next, baseline.raw));
+    const written = [...writeResult.created, ...writeResult.updated];
+    if (baselineWritten) written.push(baselinePath(opts.projectRoot));
 
     if (maxStage <= 7) {
       return {
-        filesWritten: [...writeResult.created, ...writeResult.updated],
+        filesWritten: written,
         lossy: this.lossy.entries(),
         tscOk: true,
         stagesRun,
@@ -401,7 +398,7 @@ export class Pipeline {
     stagesRun = 8;
 
     return {
-      filesWritten: [...writeResult.created, ...writeResult.updated],
+      filesWritten: written,
       lossy: this.lossy.entries(),
       tscOk,
       stagesRun,
@@ -492,13 +489,6 @@ export class Pipeline {
           },
         );
       }
-      // Record the schemaId -> descriptor mapping so stage 6 can diff
-      // each schema against its own descriptor instead of every
-      // descriptor in the project. The descriptor is `file.descriptor`
-      // — the original `loopback.config.json.schemas[]` entry — not the
-      // `sourcePath`, which embeds the file-relative path inside that
-      // source.
-      this.schemaOrigins.set(schemaId, file.descriptor);
       parsed.push({
         sourcePath: file.sourcePath,
         descriptor: file.descriptor,
@@ -518,6 +508,12 @@ export class Pipeline {
     for (const p of parsed) {
       try {
         this.registry.add(p.schema);
+        if (
+          typeof p.schema.$id === 'string' &&
+          isLocalSourceDescriptor(p.descriptor)
+        ) {
+          this.localSchemaIds.add(p.schema.$id);
+        }
       } catch (cause) {
         const id = p.schema.$id ?? '';
         throw new ContractsValidationError(
@@ -534,109 +530,130 @@ export class Pipeline {
   private stage4ResolveRefs(): void {
     for (const schema of this.registry.list()) {
       const rootId = typeof schema.$id === 'string' ? schema.$id : '<unknown>';
-      this.walkResolveRefs(schema, rootId, rootId);
+      this.walkResolveRefs(schema, rootId, schema, rootId, '');
     }
   }
 
   /**
-   * Walk a schema resolving every `$ref` against the current base URI per
+   * Walk a schema resolving every `$ref` against the current base per
    * RFC 3986 §5.3 — JSON Schema 2020-12 §8.2.1.7 makes `$id` the base for
-   * its enclosing subschema, so we update the base when descending into a
-   * subschema that declares its own `$id`.
+   * its enclosing subschema, so we update the base (and the document local
+   * pointers resolve into) when descending into a subschema that declares
+   * its own `$id`.
+   *
+   * Plain `$id`s (`money`, `appraisal-intake`) are first-class: references
+   * resolve through {@link resolveRefTarget}, which resolves them against a
+   * synthetic base URI and maps the result back to the plain registry key,
+   * so `money`, `money#/$defs/amount` and `#/$defs/x` all resolve. The
+   * synthetic base never appears in emitted names.
    *
    * `json-schema-traverse` exposes `jsonPtr` but not base-URI state, so we
-   * recurse ourselves over the standard 2020-12 keyword set. Remote
-   * `http(s)://` refs that don't resolve to a loaded schema still error —
-   * fetching remote refs is out of scope for v1.0.
+   * recurse ourselves. Remote refs that don't resolve to a loaded schema
+   * error — fetching remote refs is out of scope for v1.0.
    */
   private walkResolveRefs(
     node: unknown,
-    baseUri: string,
+    baseId: string,
+    document: unknown,
     rootId: string,
+    path: string,
   ): void {
     if (Array.isArray(node)) {
-      for (const item of node) this.walkResolveRefs(item, baseUri, rootId);
+      node.forEach((item, i) =>
+        this.walkResolveRefs(item, baseId, document, rootId, `${path}/${i}`),
+      );
       return;
     }
     if (!isPlainObject(node)) return;
 
     // Per RFC 3986 §5.3 — entering a subschema with its own `$id` rebases
-    // every relative `$ref` beneath it. Absolute `$id` replaces baseUri;
-    // relative `$id` resolves against the current base.
-    let currentBase = baseUri;
+    // every relative `$ref` beneath it and makes it the document that
+    // same-document pointers resolve into.
+    let currentBase = baseId;
+    let currentDocument = document;
     const subId = node['$id'];
-    if (typeof subId === 'string' && subId.length > 0) {
-      try {
-        currentBase = new URL(subId, baseUri).href;
-      } catch {
-        // Malformed `$id` — leave baseUri unchanged; Ajv would have
-        // flagged it in stage 2 anyway.
-      }
+    if (typeof subId === 'string' && subId.length > 0 && node !== document) {
+      // A malformed `$id` leaves the base unchanged; Ajv flags it in
+      // stage 2 anyway.
+      currentBase = resolveIdReference(subId, baseId) ?? baseId;
+      currentDocument = node;
     }
 
     const ref = node['$ref'];
     if (typeof ref === 'string') {
-      this.checkRef(ref, currentBase, rootId);
+      this.checkRef(ref, currentBase, currentDocument, rootId, `${path}/$ref`);
     }
 
-    // Recurse over every value; keyword-aware filtering isn't needed here
-    // because `checkRef` only fires on the `$ref` key and `$id` is
-    // re-evaluated at every depth.
     for (const [key, value] of Object.entries(node)) {
-      if (key === '$id' || key === '$ref') continue;
-      this.walkResolveRefs(value, currentBase, rootId);
+      // Instance data (`enum`, `const`, `examples`, `default`) is not a
+      // schema, so a `$ref`-shaped value inside it is not a reference.
+      if (key === '$id' || key === '$ref' || DATA_KEYWORDS.has(key)) continue;
+      const keyPath = `${path}/${escapePointerToken(key)}`;
+      // In a name-to-schema map every key is a name, even `$ref` / `$id`:
+      // walk each value as a schema.
+      if (SCHEMA_MAP_KEYWORDS.has(key) && isPlainObject(value)) {
+        for (const [name, sub] of Object.entries(value)) {
+          this.walkResolveRefs(
+            sub,
+            currentBase,
+            currentDocument,
+            rootId,
+            `${keyPath}/${escapePointerToken(name)}`,
+          );
+        }
+        continue;
+      }
+      this.walkResolveRefs(
+        value,
+        currentBase,
+        currentDocument,
+        rootId,
+        keyPath,
+      );
     }
   }
 
-  private checkRef(ref: string, baseUri: string, rootId: string): void {
+  private checkRef(
+    ref: string,
+    baseId: string,
+    document: unknown,
+    rootId: string,
+    instancePath: string,
+  ): void {
+    const details = {sourcePath: rootId, instancePath, schemaId: rootId};
     if (ref.startsWith('git+') || ref.startsWith('npm:')) {
       throw new ContractsValidationError(
         `stage 4: remote \`$ref\` '${ref}' is out of scope for v1.0; ` +
           `move the target schema into a local source declared in \`loopback.config.json\``,
-        {sourcePath: rootId, instancePath: '/$ref', schemaId: rootId},
+        details,
       );
     }
 
-    // Per RFC 3986 §5.3 — resolve `$ref` against the active base URI so
-    // both absolute (`http(s)://…`) and relative refs (`foo.schema.json`,
-    // `#/$defs/Bar`) map to a canonical absolute identifier.
-    let resolved: string;
-    try {
-      resolved = new URL(ref, baseUri).href;
-    } catch {
-      throw new ContractsValidationError(
-        `stage 4: \`$ref\` '${ref}' from schema '${rootId}' is not a valid URI reference`,
-        {sourcePath: rootId, instancePath: '/$ref', schemaId: rootId},
-      );
-    }
-
-    // Strip the fragment — the registry keys on `$id` (no fragment); any
-    // fragment is a JSON Pointer into the resolved document and is
-    // validated lazily by Ajv at consumption time.
-    const hashAt = resolved.indexOf('#');
-    const target = hashAt >= 0 ? resolved.slice(0, hashAt) : resolved;
-
-    // Same-document fragment ref (`#/$defs/Foo`) resolves to the base
-    // URI itself; the base IS a registered schema by construction.
-    //
     // TODO(v1.1): RFC 3986 §6 URI equivalence — fold case-insensitive
-    // scheme/host, drop default ports (80 for http, 443 for https), and
-    // normalise percent-encoding before comparing `target` to `baseUri`
-    // and before `registry.has(target)`. Today two semantically-equal
-    // refs that differ only in case (`HTTPS://Example.COM/...` vs
-    // `https://example.com/...`) or in default-port form
-    // (`https://example.com:443/x` vs `https://example.com/x`) would
-    // dangling-ref-error even though they reference the same schema.
-    // Low impact in practice (authors copy `$id` verbatim) and gated
-    // behind a URL canonicaliser; deferring rather than rushing a
-    // half-correct implementation in.
-    if (target.length === 0 || target === baseUri) return;
-
-    if (!this.registry.has(target)) {
+    // scheme/host, drop default ports and normalise percent-encoding before
+    // the registry lookup. Today two semantically-equal URL refs that differ
+    // only in case or default-port form dangling-ref-error. Low impact in
+    // practice (authors copy `$id` verbatim).
+    const target = resolveRefTarget(ref, baseId, this.registry);
+    if (target === undefined) {
       throw new ContractsValidationError(
         `stage 4: dangling \`$ref\` '${ref}' from schema '${rootId}' — ` +
-          `resolved to '${target}' but no schema with that \`$id\` was loaded`,
-        {sourcePath: rootId, instancePath: '/$ref', schemaId: rootId},
+          `no loaded schema has a matching \`$id\` (resolved against ` +
+          `'${baseId}')`,
+        details,
+      );
+    }
+
+    // A fragment that is not a JSON Pointer is a `$anchor` name; Ajv
+    // resolves those at compile time, so only pointers are walked here.
+    if (!target.fragment.startsWith('/')) return;
+    const targetDocument =
+      target.id === baseId ? document : this.registry.get(target.id);
+    if (walkJsonPointer(targetDocument, target.fragment) === undefined) {
+      throw new ContractsValidationError(
+        `stage 4: dangling \`$ref\` '${ref}' from schema '${rootId}' — ` +
+          `'${target.id}' has no '#${target.fragment}'`,
+        details,
       );
     }
   }
@@ -892,142 +909,90 @@ export class Pipeline {
 
   // ----- Stage 6 -------------------------------------------------------
 
+  /**
+   * Compare every loaded schema against its last accepted form in the
+   * committed baseline (`contracts.lock.json`) and refuse breaking
+   * changes. A schema with no baseline entry is new and passes; a
+   * baseline entry whose schema is no longer loaded is a removed contract
+   * and counts as breaking. A schema the baseline records only by digest
+   * (a remote source, see `baseline.includeRemote`) cannot be classified,
+   * so any change to it counts as breaking. `--allow-breaking` or
+   * `migration-strategy.<schemaId>.mode = 'allow'` lets a breaking change
+   * through. Returns the next baseline and the text it replaces, which
+   * {@link run} writes only after codegen succeeds; `undefined` when
+   * `baseline.enabled` is `false`.
+   */
   private async stage6DiffBreakingChanges(
     opts: PipelineRunOptions,
-  ): Promise<DiffStateCache> {
-    const cache = await loadDiffStateCache(opts.projectRoot);
-    const next: DiffStateCache = {version: 1, entries: {}};
-    const refusals: string[] = [];
+  ): Promise<{next: SchemaBaseline; raw: string | undefined} | undefined> {
+    const settings = opts.config.baseline;
+    if (settings?.enabled === false) return undefined;
+    const includeRemote = settings?.includeRemote === true;
 
-    // Iterate each schema against its own originating descriptor (recorded
-    // in stage 2) instead of doing an `N × M` Cartesian over every
-    // descriptor in the project. Schemas with no recorded origin are
-    // skipped — they cannot have come from a configured source so the
-    // diff has no descriptor to anchor to.
+    const loaded = await loadBaseline(opts.projectRoot);
+    const previous = loaded?.baseline;
+    const schemas = new Map<string, JSONSchema>();
+    const digests = new Map<string, string>();
+    const refusals: string[] = [];
+    const refuse = (id: string, what: string): void => {
+      const allowedByStrategy =
+        ownEntry(opts.config['migration-strategy'], id)?.mode === 'allow';
+      if (opts.allowBreaking !== true && !allowedByStrategy) {
+        refusals.push(`'${id}': ${what}`);
+      }
+    };
+
     for (const schema of this.registry.list()) {
       const id = schema.$id;
       if (typeof id !== 'string' || id.length === 0) continue;
-      const descriptor = this.schemaOrigins.get(id);
-      if (descriptor === undefined) continue;
-      const pin = extractPin(descriptor);
-      const cacheKey = `${descriptor}@${id}`;
-      const previous = cache.entries[cacheKey];
-      const canonical = canonicalJsonStringify(schema);
-
-      // Only diff when a version pin actually changed. Missing previous
-      // record or matching pin means nothing to compare.
-      if (previous && previous.pin !== pin) {
-        let prevSchema: JSONSchema | undefined;
-        try {
-          const parsed: unknown = JSON.parse(previous.schemaJson);
-          // Runtime shape guard — `JSON.parse` returns `unknown` and the
-          // cache file is user-readable, so a hand-edited entry could
-          // contain `null`, a string, or any other JSON value. A
-          // non-object would slip through Ajv's later checks because the
-          // diff classifier reads properties off the value directly.
-          // Treat it the same as a corrupt entry.
-          if (
-            typeof parsed !== 'object' ||
-            parsed === null ||
-            Array.isArray(parsed)
-          ) {
-            throw new ContractsCodegenError(
-              `diff-state cache entry for '${cacheKey}' is not a JSON object ` +
-                `(got ${parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed})`,
-              {emitterKind: 'pipeline', schemaId: id},
-            );
-          }
-          prevSchema = parsed as JSONSchema;
-        } catch (err) {
-          // Corrupted cache entry — surface a warn-level lossy report
-          // naming the offending cache key and SKIP the diff. The
-          // previous behaviour silently compared the schema against
-          // itself, which always produced `unchanged` and so hid any
-          // genuine breaking change on this descriptor flip.
-          this.lossy.report({
-            feature: 'diff-cache-corrupt',
-            source: {schemaId: id},
-            severity: 'warn',
-            message:
-              `diff-state cache entry for '${cacheKey}' is corrupt ` +
-              `(${(err as Error).message}); skipping backward-compat diff ` +
-              `for this schema this run. The entry will be rewritten on success.`,
-          });
-        }
-        if (prevSchema !== undefined) {
-          const verdict = classifyDiff(prevSchema, schema);
-          if (verdict === 'breaking') {
-            const strategy = opts.config['migration-strategy']?.[id];
-            const allowedByStrategy = strategy?.mode === 'allow';
-            if (!opts.allowBreaking && !allowedByStrategy) {
-              refusals.push(
-                `breaking change in '${id}' (${previous.pin} -> ${pin})`,
-              );
-            }
-          }
-        }
+      const digest = schemaDigest(schema);
+      if (includeRemote || this.localSchemaIds.has(id)) {
+        schemas.set(id, schema);
+      } else {
+        digests.set(id, digest);
       }
-
-      next.entries[cacheKey] = {
-        descriptor,
-        schemaId: id,
-        pin,
-        schemaJson: canonical,
-      };
+      const accepted = ownEntry(previous?.schemas, id);
+      if (accepted !== undefined) {
+        if (classifySchemaChange(accepted, schema) === 'breaking') {
+          refuse(id, 'breaking change');
+        }
+        continue;
+      }
+      const acceptedDigest = ownEntry(previous?.digests, id);
+      if (acceptedDigest !== undefined && acceptedDigest !== digest) {
+        refuse(
+          id,
+          'changed (remote-source schema recorded by digest only, so the ' +
+            'change cannot be classified; set `baseline.includeRemote` to ' +
+            'store its body)',
+        );
+      }
+    }
+    const previousIds = new Set([
+      ...Object.keys(previous?.schemas ?? {}),
+      ...Object.keys(previous?.digests ?? {}),
+    ]);
+    for (const id of previousIds) {
+      if (!schemas.has(id) && !digests.has(id)) refuse(id, 'schema removed');
     }
 
     if (refusals.length > 0) {
       throw new ContractsPipelineError(
-        `stage 6: refusing to proceed; ${refusals.length} breaking schema change(s) detected: ${refusals.join('; ')}. ` +
-          `Re-run with --allow-breaking or declare \`migration-strategy.<schemaId>.mode = 'allow'\` in loopback.config.json.`,
+        `stage 6: refusing to proceed; ${refusals.length} breaking schema ` +
+          `change(s) against ${BASELINE_FILENAME}: ${refusals.join('; ')}. ` +
+          `Re-run \`lb-contracts gen --allow-breaking\` to accept them and ` +
+          `update the baseline, or declare ` +
+          `\`migration-strategy.<schemaId>.mode = 'allow'\` in loopback.config.json.`,
         {stage: 'backward-compat-diff'},
       );
     }
 
-    return next;
-  }
-
-  /**
-   * Persist the next diff-state baseline atomically. Writes to a sibling
-   * tmp file in the same directory, `fsync`s the tmp for POSIX durability
-   * (mirroring `file-writer.ts:writeTmpDurable`), then `rename`s it into
-   * place — POSIX (and NTFS) guarantee `rename` within a directory is
-   * atomic, so a crash mid-write can never leave `diff-state.json`
-   * half-written and corrupt the next run's baseline. On any failure, a
-   * best-effort `unlink` clears the tmp; the original error is re-raised.
-   *
-   * The cache is rebuildable from the schema set, so a missing `fsync`
-   * implementation on the underlying filesystem (some network mounts,
-   * Windows ReFS) is not fatal — the call is wrapped and surfaced via the
-   * `debug` channel (`DEBUG=loopback:contracts:pipeline`) instead of
-   * thrown, matching `writeTmpDurable`'s policy.
-   */
-  private async persistDiffStateCache(
-    opts: PipelineRunOptions,
-    next: DiffStateCache,
-  ): Promise<void> {
-    const cachePath = diffStateCachePath(opts.projectRoot);
-    await mkdir(dirname(cachePath), {recursive: true});
-    const tmpPath = `${cachePath}.tmp.${randomBytes(6).toString('hex')}`;
-    const json = JSON.stringify(next, null, 2) + '\n';
-    try {
-      const handle = await open(tmpPath, 'w');
-      try {
-        await handle.writeFile(json);
-        try {
-          await handle.sync();
-        } catch (err) {
-          debug('fsync unsupported on %s: %s', tmpPath, (err as Error).message);
-        }
-      } finally {
-        await handle.close();
-      }
-      await rename(tmpPath, cachePath);
-    } catch (err) {
-      // Best-effort cleanup — never mask the original error.
-      await unlink(tmpPath).catch(() => undefined);
-      throw err;
-    }
+    const next: SchemaBaseline = {
+      version: 1,
+      schemas: Object.fromEntries(schemas),
+      digests: Object.fromEntries(digests),
+    };
+    return {next, raw: loaded?.raw};
   }
 
   // ----- Stage 7 -------------------------------------------------------
@@ -1093,12 +1058,19 @@ export class Pipeline {
     // either rolls back everything (phase 1) or leaves a rare,
     // well-described partial state (phase 2) covering both roots,
     // preserving the no-partial-writes guarantee across the two anchors.
+    //
+    // The `models/` bucket is relocated to `paths.modelsDir` (the
+    // `outputDir` config key / `--out-dir` flag) first; the barrel above
+    // already saw the logical `models/` paths.
+    const placed = placeModelOutputs(
+      [...transformedFiles, ...barrelFiles],
+      this.paths,
+    );
     const allFiles: readonly EmittedFile[] = [
-      ...transformedFiles,
-      ...barrelFiles,
+      ...placed.files,
       ...this.writeQueue,
     ];
-    const perFileRoots = new Map<string, string>();
+    const perFileRoots = new Map<string, string>(placed.perFileRoots);
     for (const meta of this.writeQueue) {
       perFileRoots.set(meta.path, this.paths.root);
     }
@@ -1635,339 +1607,6 @@ function formatAjvErrors(errors: ErrorObject[] | null | undefined): string {
       return `  - ${path} ${e.message ?? ''}${suffix} [keyword=${e.keyword}]`;
     })
     .join('\n');
-}
-
-/**
- * Pull a version pin out of a descriptor:
- *   - `git+…#v1.2.0` -\> `v1.2.0`
- *   - `git+…?ref=sha` -\> `sha`
- *   - `npm:pkg@1.2.0` -\> `1.2.0`
- *   - bare path or unpinned URL -\> `''`
- */
-function extractPin(descriptor: string): string {
-  const hash = descriptor.indexOf('#');
-  if (hash >= 0) return descriptor.slice(hash + 1);
-  const refMatch = /[?&]ref=([^&]+)/.exec(descriptor);
-  if (refMatch && refMatch[1] !== undefined) return refMatch[1];
-  if (descriptor.startsWith('npm:')) {
-    const at = descriptor.lastIndexOf('@');
-    if (at > 'npm:'.length) return descriptor.slice(at + 1);
-  }
-  return '';
-}
-
-/**
- * Stable, key-sorted JSON serialisation. Throws on object-identity cycles
- * because cyclic schemas have no canonical encoding — silently returning
- * `null` for the cycle would let two schemas that differ only inside a
- * cycle hash-compare equal, defeating stage 3's collision check and stage
- * 6's breaking-change diff. JSON Schema documents must be DAGs (deep
- * `$ref` cycles are JSON Pointers, not object cycles), so a real cycle
- * here means upstream data corruption — surface it loudly.
- *
- * @throws ContractsCodegenError When `value` contains an object cycle.
- */
-function canonicalJsonStringify(value: unknown): string {
-  const seen = new WeakSet<object>();
-  const visit = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(visit);
-    if (v && typeof v === 'object') {
-      if (seen.has(v as object)) {
-        throw new ContractsCodegenError(
-          'canonicalJsonStringify: refusing to serialise object cycle; ' +
-            'JSON Schema documents must be acyclic by object identity',
-          {emitterKind: 'pipeline', schemaId: '<canonical-json>'},
-        );
-      }
-      seen.add(v as object);
-      const entries = Object.entries(v as Record<string, unknown>)
-        .map(([k, val]) => [k, visit(val)] as const)
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-      return Object.fromEntries(entries);
-    }
-    return v;
-  };
-  return JSON.stringify(visit(value));
-}
-
-/**
- * Classify a shape diff between an old and a new JSON Schema as one of:
- *
- *   - `unchanged` — canonical JSON identical.
- *   - `additive` — every inspected change strictly grows the accepted
- *     set (new optional property, required-to-optional promotion, enum
- *     widening).
- *   - `narrowing` — type-set or `enum` shrinks without removals.
- *   - `breaking` — any property removal, type mismatch, optional-to-
- *     required transition, `additionalProperties: true -> false`,
- *     `enum` shrinkage (new is a strict subset of old), `pattern`
- *     change, `format` change, `minLength`/`minimum`/`maxLength`/
- *     `maximum`/`exclusiveMinimum`/`exclusiveMaximum`/`multipleOf`
- *     tightening, or any difference inside `oneOf`/`anyOf`/`allOf`/
- *     `$ref`/`if`/`then`/`else`/`not`/`items`/`prefixItems`/`contains`.
- *
- * After the inspected-keys check, any remaining canonical-JSON delta in
- * keywords NOT inspected here downgrades to `breaking` rather than
- * `additive` — the differ should err conservative for the v1.0 gate.
- *
- * Heuristic limits — this is not a full semantic differ:
- *
- *   - Cross-keyword interactions are not modelled (e.g., `oneOf` rewrite
- *     into an equivalent `if`/`then`/`else` still counts as breaking).
- *   - Tuple-positional `items` rearrangement is not detected separately
- *     from a swap; both produce `breaking` via the "any change inside
- *     items" rule above.
- *   - Numeric range tightening uses `<` / `>` on raw numbers without
- *     normalising integer vs number representations.
- *   - String `pattern` comparison is purely syntactic — semantically
- *     equivalent regexes (`a|b` vs `b|a`) count as breaking.
- *   - The classifier walks the schema root only. Property-level
- *     subschemas are inspected for type and presence, but their own
- *     nested keywords (e.g., a property whose schema gains a stricter
- *     `pattern`) are caught only by the conservative "remaining
- *     canonical difference" fallback.
- *
- * Override with `migration-strategy.<schemaId>.mode = 'allow'` in
- * `loopback.config.json` when the heuristic is wrong for a given
- * schema.
- */
-function classifyDiff(prev: JSONSchema, next: JSONSchema): DiffClassification {
-  const prevCanon = canonicalJsonStringify(prev);
-  const nextCanon = canonicalJsonStringify(next);
-  if (prevCanon === nextCanon) return 'unchanged';
-
-  let verdict: DiffClassification = 'additive';
-  const prevRec = prev as unknown as Record<string, unknown>;
-  const nextRec = next as unknown as Record<string, unknown>;
-
-  // additionalProperties: true -> false (or omitted -> false) closes the
-  // accepted set; any payload with a previously-tolerated extra property
-  // now fails. Breaking.
-  const prevAP = prevRec['additionalProperties'];
-  const nextAP = nextRec['additionalProperties'];
-  if (prevAP !== false && nextAP === false) return 'breaking';
-
-  // enum: shrinkage (new subset of old) drops accepted values. Strict
-  // widening is additive; any value removed is breaking.
-  if (Array.isArray(prevRec['enum']) && Array.isArray(nextRec['enum'])) {
-    const nextEnumSet = new Set(nextRec['enum'] as unknown[]);
-    for (const v of prevRec['enum'] as unknown[]) {
-      if (!nextEnumSet.has(v)) return 'breaking';
-    }
-    if (nextEnumSet.size < (prevRec['enum'] as unknown[]).length) {
-      verdict = verdict === 'additive' ? 'narrowing' : verdict;
-    }
-  } else if ('enum' in prevRec && !('enum' in nextRec)) {
-    // Dropping the enum constraint widens the accepted set — additive.
-  } else if (!('enum' in prevRec) && 'enum' in nextRec) {
-    // Adding an enum where none existed narrows to a finite set —
-    // breaking for any payload outside the new set.
-    return 'breaking';
-  }
-
-  // pattern / format: any change is breaking (purely syntactic diff —
-  // semantically equivalent regexes still trip this; the override knob
-  // exists for the false-positive case).
-  if (
-    typeof prevRec['pattern'] === 'string' &&
-    prevRec['pattern'] !== nextRec['pattern']
-  ) {
-    return 'breaking';
-  }
-  if ('pattern' in nextRec && !('pattern' in prevRec)) return 'breaking';
-  if (
-    typeof prevRec['format'] === 'string' &&
-    prevRec['format'] !== nextRec['format']
-  ) {
-    return 'breaking';
-  }
-  if ('format' in nextRec && !('format' in prevRec)) return 'breaking';
-
-  // Numeric / length tightening — new bound is strictly more
-  // restrictive than the old one. Loosening or removing is additive.
-  if (tightens(prevRec['minLength'], nextRec['minLength'], 'increase')) {
-    return 'breaking';
-  }
-  if (tightens(prevRec['maxLength'], nextRec['maxLength'], 'decrease')) {
-    return 'breaking';
-  }
-  if (tightens(prevRec['minimum'], nextRec['minimum'], 'increase')) {
-    return 'breaking';
-  }
-  if (tightens(prevRec['maximum'], nextRec['maximum'], 'decrease')) {
-    return 'breaking';
-  }
-  if (
-    tightens(
-      prevRec['exclusiveMinimum'],
-      nextRec['exclusiveMinimum'],
-      'increase',
-    )
-  ) {
-    return 'breaking';
-  }
-  if (
-    tightens(
-      prevRec['exclusiveMaximum'],
-      nextRec['exclusiveMaximum'],
-      'decrease',
-    )
-  ) {
-    return 'breaking';
-  }
-  if (tightens(prevRec['minItems'], nextRec['minItems'], 'increase')) {
-    return 'breaking';
-  }
-  if (tightens(prevRec['maxItems'], nextRec['maxItems'], 'decrease')) {
-    return 'breaking';
-  }
-  if (
-    tightens(prevRec['minProperties'], nextRec['minProperties'], 'increase')
-  ) {
-    return 'breaking';
-  }
-  if (
-    tightens(prevRec['maxProperties'], nextRec['maxProperties'], 'decrease')
-  ) {
-    return 'breaking';
-  }
-
-  // Any structural change inside oneOf/anyOf/allOf/$ref/items/etc. —
-  // the differ doesn't recurse, so any canonical-JSON delta in these
-  // keywords is treated as breaking.
-  for (const k of COMPOSITION_KEYWORDS) {
-    const a = prevRec[k];
-    const b = nextRec[k];
-    if (canonicalKeywordDiffers(a, b)) return 'breaking';
-  }
-
-  const prevProps = (prev.properties ?? {}) as Record<string, JSONSchema>;
-  const nextProps = (next.properties ?? {}) as Record<string, JSONSchema>;
-  const prevRequired = new Set(prev.required ?? []);
-  const nextRequired = new Set(next.required ?? []);
-
-  // Removed property -> breaking.
-  for (const k of Object.keys(prevProps)) {
-    if (!(k in nextProps)) return 'breaking';
-  }
-  // Optional -> required on a pre-existing property -> breaking.
-  for (const k of nextRequired) {
-    if (!prevRequired.has(k) && k in prevProps) return 'breaking';
-  }
-  // Required -> optional is additive; no verdict change needed.
-
-  // Per-property type comparison + any nested canonical change
-  // downgrades the verdict per the conservative fallback rule.
-  for (const [k, nextProp] of Object.entries(nextProps)) {
-    const prevProp = prevProps[k];
-    if (!prevProp) continue; // brand-new property is additive
-    if (
-      typeof prevProp.type === 'string' &&
-      typeof nextProp.type === 'string'
-    ) {
-      if (prevProp.type !== nextProp.type) return 'breaking';
-    } else if (Array.isArray(prevProp.type) && Array.isArray(nextProp.type)) {
-      const prevTypes = new Set(prevProp.type);
-      const nextTypes = new Set(nextProp.type);
-      for (const t of prevTypes) {
-        if (!nextTypes.has(t)) return 'breaking';
-      }
-      if (nextTypes.size < prevTypes.size) {
-        verdict = verdict === 'additive' ? 'narrowing' : verdict;
-      }
-    } else if (
-      canonicalKeywordDiffers(prevProp as unknown, nextProp as unknown)
-    ) {
-      // Any nested property-schema change we didn't recognise — be
-      // conservative.
-      return 'breaking';
-    }
-  }
-
-  // Root-level type comparison — same rule as per-property.
-  if (
-    typeof prevRec['type'] === 'string' &&
-    typeof nextRec['type'] === 'string' &&
-    prevRec['type'] !== nextRec['type']
-  ) {
-    return 'breaking';
-  }
-
-  // Conservative fallback: if any inspected keyword changed and we
-  // already returned, we never get here. If we get here the canonical
-  // strings still differ, meaning the delta lives entirely in
-  // un-inspected keywords. Downgrade to `breaking` rather than
-  // `additive` — better a false-positive the user can override than a
-  // missed regression.
-  if (prevCanon !== nextCanon && verdict === 'additive') {
-    return 'breaking';
-  }
-
-  return verdict;
-}
-
-const COMPOSITION_KEYWORDS = [
-  'oneOf',
-  'anyOf',
-  'allOf',
-  'not',
-  '$ref',
-  'if',
-  'then',
-  'else',
-  'items',
-  'prefixItems',
-  'contains',
-  'propertyNames',
-  'patternProperties',
-] as const;
-
-/**
- * Compare two keyword values by canonical JSON. Used by the
- * classifyDiff composition-keyword fallback to avoid duplicating the
- * "any nested change is breaking" rule per keyword.
- */
-function canonicalKeywordDiffers(a: unknown, b: unknown): boolean {
-  if (a === undefined && b === undefined) return false;
-  if (a === undefined || b === undefined) return true;
-  return canonicalJsonStringify(a) !== canonicalJsonStringify(b);
-}
-
-/**
- * Numeric tightening check used by classifyDiff. `direction` says
- * which side moves to make the bound stricter (`increase` for `min*`
- * keywords, `decrease` for `max*`). Returns true only when both values
- * are finite numbers and the new value is strictly stricter.
- */
-function tightens(
-  prev: unknown,
-  next: unknown,
-  direction: 'increase' | 'decrease',
-): boolean {
-  if (typeof prev !== 'number' || typeof next !== 'number') {
-    // Adding a bound where none existed is breaking.
-    if (typeof prev !== 'number' && typeof next === 'number') return true;
-    return false;
-  }
-  return direction === 'increase' ? next > prev : next < prev;
-}
-
-function diffStateCachePath(projectRoot: string): string {
-  return resolve(projectRoot, '.loopback', 'cache', 'diff-state.json');
-}
-
-async function loadDiffStateCache(
-  projectRoot: string,
-): Promise<DiffStateCache> {
-  const path = diffStateCachePath(projectRoot);
-  try {
-    const raw = await readFile(path, 'utf8');
-    const parsed = JSON.parse(raw) as DiffStateCache;
-    if (parsed && parsed.version === 1 && parsed.entries) return parsed;
-    return {version: 1, entries: {}};
-  } catch {
-    return {version: 1, entries: {}};
-  }
 }
 
 /**

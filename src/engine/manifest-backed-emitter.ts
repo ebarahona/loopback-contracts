@@ -1,7 +1,14 @@
 import Ajv2020 from 'ajv/dist/2020';
 import type {ValidateFunction} from 'ajv';
 import {ContractsCodegenError, ContractsValidationError} from '../helpers';
-import {toCamel, toKebab, toPascal, toSnake} from '../helpers/identifiers';
+import {resolveSchemaRef, walkJsonPointer} from '../helpers/schema-ref';
+import {
+  schemaNameStems,
+  toCamel,
+  toKebab,
+  toPascal,
+  toSnake,
+} from '../helpers/identifiers';
 import type {
   EmittedFile,
   EmitterContext,
@@ -37,26 +44,21 @@ function getManifestAjv(): Ajv2020 {
 }
 
 /**
- * Strip directory separators and the trailing `.schema.json` suffix from a
- * schema `$id` so manifest emitters land at a filename built from the bare
- * identifier (e.g. `'customer.v1'` -\> `'customer.v1'`).
+ * A `$ref` resolved for a template (the `resolveRef(ref, base?)` local).
+ *
+ * @internal
  */
-function baseName(id: string): string {
-  const last = id.split(/[\\/]/).pop() ?? id;
-  return last.replace(/\.schema\.json$/i, '');
-}
-
-/**
- * Compute the derived per-schema synthetic identifier — the input to every
- * `{{...Name}}` placeholder. We use the dot-separated head of the schema
- * `$id` (e.g. `customer.v1` -\> `customer`) so the casing helpers do not
- * fold a version suffix into the rendered name. Manifest authors who want
- * the full id can still reach it through other template helpers if/when
- * they are added.
- */
-function identifierStem(schemaId: string): string {
-  const base = baseName(schemaId);
-  return base.split('.')[0] ?? base;
+interface TemplateResolvedRef {
+  /** `$id` of the document that owns the target (`''` when it has none). */
+  readonly id: string;
+  /** The owning document. */
+  readonly document: JSONSchema;
+  /** JSON Pointer into `document`; `''` for a whole-document ref. */
+  readonly pointer: string;
+  /** The value at `pointer`, or `undefined` when it does not exist. */
+  readonly target: unknown;
+  /** `className` this emitter gives the owning document. */
+  readonly className: string;
 }
 
 /**
@@ -245,20 +247,68 @@ export class ManifestBackedEmitter implements ProjectionEmitter {
         {emitterKind: `manifest:${this.kind}`, schemaId: '<unknown>'},
       );
     }
-    const stem = identifierStem(schemaId);
+    // Every `{{...Name}}` placeholder derives from the dot-separated head of
+    // a plain `$id` (`customer.v1` -> `customer`) so the casing helpers do
+    // not fold a version suffix into the rendered name. URL-style ids use
+    // the sanitised slug (paths) and title-derived name (`className`); see
+    // `schemaNameStems`. Every name is computed against the whole run
+    // (`peers`) so clashing URL-id names are disambiguated consistently.
+    const peers = ctx.registry.list();
+    const {typeStem, fileStem} = schemaNameStems(
+      ctx.schema,
+      'head',
+      schemaId,
+      peers,
+    );
     const pathCtx: PathInterpolationContext = {
-      kebabName: toKebab(stem),
-      pascalName: toPascal(stem),
-      camelName: toCamel(stem),
-      snakeName: toSnake(stem),
+      kebabName: toKebab(fileStem),
+      pascalName: toPascal(fileStem),
+      camelName: toCamel(fileStem),
+      snakeName: toSnake(fileStem),
       kind: this.kind,
     };
-    const className = toPascal(stem);
+    const className = toPascal(typeStem);
+    // Names the library sidecars (types, zod, mock-data) use for this
+    // schema, so templates can import a sibling sidecar by its real
+    // basename and export name.
+    const full = schemaNameStems(ctx.schema, 'full', schemaId, peers);
+    const sidecar = {
+      typeName: toPascal(full.typeStem),
+      fileBase: toKebab(full.fileStem),
+    };
+
+    // Resolve a `$ref` the way pipeline stage 4 does, against `base` (the
+    // document the ref appears in; defaults to the schema being emitted).
+    // `undefined` when no loaded schema matches.
+    const resolveRef = (
+      ref: string,
+      base: JSONSchema = ctx.schema,
+    ): TemplateResolvedRef | undefined => {
+      const hit = resolveSchemaRef(ref, base, ctx.registry);
+      if (hit === undefined) return undefined;
+      return {
+        id: hit.id,
+        document: hit.document,
+        pointer: hit.pointer,
+        target: walkJsonPointer(hit.document, hit.pointer),
+        className: toPascal(
+          schemaNameStems(hit.document, 'head', hit.id, peers).typeStem,
+        ),
+      };
+    };
+    // `className` a cross-document `$ref` target gets from this emitter, or
+    // `undefined` when no loaded schema matches the ref.
+    const refClassName = (ref: string): string | undefined =>
+      resolveRef(ref)?.className;
 
     const viewModel = {
       schema: ctx.schema,
       options,
       className,
+      sidecar,
+      refClassName,
+      resolveRef,
+      lossy: ctx.lossy,
       schemaId,
       registry: ctx.registry,
       importMap: ctx.importMap,
