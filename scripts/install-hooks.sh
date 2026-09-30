@@ -1,10 +1,19 @@
 #!/bin/sh
 # Auto-runs from `npm install` via the `prepare` script.
 #
-# Never modifies your git config (local or global). If lefthook can't
-# install because you have a `core.hooksPath` set (global or local),
-# prints opt-in instructions and exits successfully so `npm install`
-# does not fail.
+# Installs this repo's lefthook hooks into THIS clone's own `.git/hooks`
+# and nowhere else. It never modifies your git config (local or global)
+# and never writes into a hooks directory that config points at outside
+# this repo. It exits 0 without installing anything when:
+#
+#   - running on CI, or under `npm pack` / `npm publish`;
+#   - this package is not the root of its own git work tree (e.g. it was
+#     installed as a dependency from a git URL or tarball, or lives
+#     under a `node_modules` directory);
+#   - `core.hooksPath` is set (globally or locally) to anything other
+#     than this repo's own `.git/hooks`. In that case lefthook would
+#     install its shims into that directory and rename your existing
+#     hooks to `*.old`, so opt-in instructions are printed instead.
 #
 # CI runs lint/build/test on every PR regardless of local hooks, so
 # skipping the local install is safe -- just slower feedback.
@@ -31,14 +40,11 @@ if [ "$npm_config_dry_run" = "true" ]; then
   exit 0
 fi
 
-if npx lefthook install; then
-  exit 0
-fi
-
-cat <<'EOF' >&2
+print_opt_in() {
+  cat <<'EOF' >&2
 
 ----------------------------------------------------------------------
-note: lefthook could not install hooks automatically.
+note: this repo's git hooks were NOT installed automatically.
 
 This usually means you have a `core.hooksPath` configured globally
 (e.g. by your dotfiles or your employer). We did NOT change your git
@@ -60,4 +66,51 @@ trade-off you prefer.
 ----------------------------------------------------------------------
 
 EOF
+}
+
+# Resolve the package root (the directory above scripts/) physically.
+pkg_root=$(cd "$(dirname "$0")/.." && pwd -P) || exit 0
+
+# Skip when installed as a dependency: never touch a consumer's repo.
+case "$pkg_root/" in
+  */node_modules/*)
+    exit 0
+    ;;
+esac
+
+# Skip unless this package is the root of its own git work tree.
+toplevel=$(git -C "$pkg_root" rev-parse --show-toplevel 2>/dev/null) || exit 0
+toplevel=$(cd "$toplevel" 2>/dev/null && pwd -P) || exit 0
+if [ "$toplevel" != "$pkg_root" ]; then
+  exit 0
+fi
+
+# Refuse to install when core.hooksPath (effective value, local or
+# global) points anywhere other than this repo's own .git/hooks.
+# lefthook installs into whatever hooksPath resolves to, and renames
+# the hooks it finds there to *.old.
+hooks_path=$(git -C "$pkg_root" config --path core.hooksPath 2>/dev/null)
+if [ -n "$hooks_path" ]; then
+  git_common_dir=$(git -C "$pkg_root" rev-parse --git-common-dir 2>/dev/null) || exit 0
+  case "$git_common_dir" in
+    /*) ;;
+    *) git_common_dir="$pkg_root/$git_common_dir" ;;
+  esac
+  own_hooks=$(cd "$git_common_dir/hooks" 2>/dev/null && pwd -P)
+  case "$hooks_path" in
+    /*) ;;
+    *) hooks_path="$pkg_root/$hooks_path" ;;
+  esac
+  resolved=$(cd "$hooks_path" 2>/dev/null && pwd -P)
+  if [ -z "$own_hooks" ] || [ "$resolved" != "$own_hooks" ]; then
+    print_opt_in
+    exit 0
+  fi
+fi
+
+if npx lefthook install; then
+  exit 0
+fi
+
+print_opt_in
 exit 0
