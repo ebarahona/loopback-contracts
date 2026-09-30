@@ -37,3 +37,9 @@ jsonschema = "jsonschema"
 openapi = "openapi"
 chokidar = "chokidar"
 jsonc = "jsonc"
+# Valid spelling variant used in error messages and tests
+unparseable = "unparseable"
+# Package name (cpy-cli) mentioned in a comment
+cpy = "cpy"
+# Deliberate misspelling used as an example of a caught config typo
+securtiy = "securtiy"
