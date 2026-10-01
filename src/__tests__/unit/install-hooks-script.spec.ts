@@ -5,9 +5,11 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -19,7 +21,9 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 // repo, and a stub `npx` on PATH that only records that it was called.
 // Nothing here reads or writes the real HOME or the real git config.
 
-const SCRIPT = resolve(__dirname, '../../../scripts/install-hooks.sh');
+const PKG_ROOT = resolve(__dirname, '../../..');
+const SCRIPT = join(PKG_ROOT, 'scripts/install-hooks.sh');
+const LEFTHOOK_PIN = 'lefthook@2.1.6';
 
 interface Sandbox {
   root: string;
@@ -78,6 +82,10 @@ function npxCalled(): boolean {
   return existsSync(sb.npxMarker);
 }
 
+function npxArgs(): string {
+  return readFileSync(sb.npxMarker, 'utf8').trim();
+}
+
 beforeEach(() => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'install-hooks-')));
   const home = join(root, 'home');
@@ -97,11 +105,12 @@ afterEach(() => {
 });
 
 describe('scripts/install-hooks.sh', () => {
-  it('installs via lefthook when no core.hooksPath is set', () => {
+  it('installs via a pinned npx lefthook when no core.hooksPath is set', () => {
     const pkg = makePackage(join(sb.root, 'repo'), true);
     const r = runScript(pkg);
     expect(r.status).toBe(0);
     expect(npxCalled()).toBe(true);
+    expect(npxArgs()).toBe(`--yes ${LEFTHOOK_PIN} install`);
   });
 
   it('installs when a local core.hooksPath points at the repo .git/hooks', () => {
@@ -194,5 +203,65 @@ describe('scripts/install-hooks.sh', () => {
     expect(runScript(pkg, {npm_command: 'publish'}).status).toBe(0);
     expect(runScript(pkg, {npm_config_dry_run: 'true'}).status).toBe(0);
     expect(npxCalled()).toBe(false);
+  });
+
+  it('opt-in instructions use the same pinned lefthook version', () => {
+    const script = readFileSync(SCRIPT, 'utf8');
+    expect(script).toContain(`npx --yes ${LEFTHOOK_PIN} install --force`);
+    expect(script).not.toMatch(/npx lefthook /);
+  });
+});
+
+describe('npm install never writes into a global core.hooksPath', () => {
+  // lefthook's npm package runs `lefthook install -f` from its own
+  // postinstall whenever CI is unset, bypassing install-hooks.sh and
+  // writing shims into whatever core.hooksPath resolves to (renaming
+  // existing hooks to *.old). It must therefore never be installed as
+  // a dependency of this package.
+  const pkgJson = JSON.parse(
+    readFileSync(join(PKG_ROOT, 'package.json'), 'utf8'),
+  ) as Record<string, Record<string, string> | undefined>;
+
+  it('does not depend on the lefthook npm package', () => {
+    for (const field of [
+      'dependencies',
+      'devDependencies',
+      'optionalDependencies',
+      'peerDependencies',
+    ]) {
+      expect(Object.keys(pkgJson[field] ?? {})).not.toContain('lefthook');
+    }
+    const lock = readFileSync(join(PKG_ROOT, 'package-lock.json'), 'utf8');
+    expect(lock).not.toMatch(/"node_modules\/lefthook(-[a-z0-9-]+)?"/);
+  });
+
+  it('has no install-time script other than the guarded prepare hook', () => {
+    const scripts = pkgJson.scripts ?? {};
+    for (const name of ['preinstall', 'install', 'postinstall']) {
+      expect(scripts[name]).toBeUndefined();
+    }
+    expect(scripts.prepare).toBe('sh scripts/install-hooks.sh');
+  });
+
+  it('leaves a sentinel hook in the global hooksPath untouched', () => {
+    const globalHooks = join(sb.root, 'global-hooks');
+    mkdirSync(globalHooks, {recursive: true});
+    const sentinel = join(globalHooks, 'commit-msg');
+    const body = '#!/bin/sh\n# sentinel\nexit 0\n';
+    writeFileSync(sentinel, body);
+    chmodSync(sentinel, 0o755);
+    writeFileSync(
+      join(sb.home, '.gitconfig'),
+      `[core]\n\thooksPath = ${globalHooks}\n`,
+    );
+
+    const pkg = makePackage(join(sb.root, 'repo'), true);
+    const r = runScript(pkg);
+
+    expect(r.status).toBe(0);
+    expect(npxCalled()).toBe(false);
+    expect(readdirSync(globalHooks)).toEqual(['commit-msg']);
+    expect(readFileSync(sentinel, 'utf8')).toBe(body);
+    expect(statSync(sentinel).mode & 0o777).toBe(0o755);
   });
 });
