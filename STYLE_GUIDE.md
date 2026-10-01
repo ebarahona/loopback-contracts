@@ -526,7 +526,7 @@ Rules:
 - A `release-please-config.json` at the repo root pins the release strategy (`node`), the changelog sections, and the package path.
 - CHANGELOG.md is generated, never hand-edited. Entries come from Conventional Commit subjects; `feat` and `fix` show up automatically, other types only if explicitly configured.
 - The release PR is the only commit that touches `version`, `CHANGELOG.md`, and the lockfile in concert. Maintainers approve and merge it; merging tags and publishes.
-- npm publish is performed by CI, not by humans. The CI job needs `NPM_TOKEN` and runs `npm publish` only on the release commit.
+- npm publish is performed by CI, not by humans. The CI job authenticates with npm trusted publishing (OIDC, no `NPM_TOKEN` secret) and runs `npm publish` only on the release commit.
 - Pre-1.0 plugins can mark every `@public` change as `BREAKING CHANGE` for the duration; this is the cleanest way to communicate that the surface is still unstable.
 - Generated artifacts (`dist/`, `*.d.ts`) are not committed. The `files` array in `package.json` controls what gets published.
 

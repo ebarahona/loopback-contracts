@@ -3,8 +3,7 @@ name: release-please
 # Auto-runs on every push to main. release-please opens / updates a
 # rolling release PR collecting Conventional Commit entries; merging
 # that PR triggers a tag + npm publish on the next push.
-# workflow_dispatch retained for manual re-runs (e.g. token rotation
-# trial publishes).
+# workflow_dispatch retained for manual re-runs.
 on:
   push:
     branches: [main]
@@ -30,11 +29,12 @@ jobs:
         if: ${{ steps.release.outputs.release_created }}
         uses: actions/checkout@v4
 
+      # Node 24 ships npm >= 11.5.1, required for npm trusted publishing (OIDC).
       - name: Setup Node
         if: ${{ steps.release.outputs.release_created }}
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           cache: npm
           always-auth: true
@@ -47,8 +47,8 @@ jobs:
         if: ${{ steps.release.outputs.release_created }}
         run: npm run build
 
+      # Authenticates via npm trusted publishing (OIDC, id-token: write);
+      # no NPM_TOKEN secret. Provenance is attached automatically.
       - name: Publish to npm
         if: ${{ steps.release.outputs.release_created }}
         run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
