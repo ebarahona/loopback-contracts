@@ -1,6 +1,6 @@
 {
   "name": "@ebarahona/loopback-contracts",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "JSON Schema-driven contract substrate for LoopBack 4 — emits LB4 model/repository/controller/datasource plus sidecars (Zod, TypeScript types, GraphQL, CloudEvents, AsyncAPI, Protocol Buffers, Avro, OpenAPI components, mock fixtures).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
