@@ -98,7 +98,7 @@ Issues use forms in [`.github/ISSUE_TEMPLATE/`](./.github/ISSUE_TEMPLATE/). Bug 
 
 Two paths cover identical checks:
 
-- **Lefthook (default)**: `npm install` runs `scripts/install-hooks.sh`, which calls `lefthook install`. If lefthook can install cleanly, hooks run in parallel against staged files (fast). If lefthook is blocked by an existing `core.hooksPath` (yours or your dotfiles), the script prints opt-in instructions and exits without changing your git config. CI still enforces lint/build/test on every PR, so you can defer wiring local hooks.
+- **Lefthook (default)**: `npm install` runs `scripts/install-hooks.sh`, which runs a pinned `npx --yes lefthook@2.1.6 install` (lefthook is intentionally not a devDependency: its npm package's postinstall would install hooks into a global `core.hooksPath`, bypassing the script's checks). If lefthook can install cleanly, hooks run in parallel against staged files (fast). If lefthook is blocked by an existing `core.hooksPath` (yours or your dotfiles), the script prints opt-in instructions and exits without changing your git config. CI still enforces lint/build/test on every PR, so you can defer wiring local hooks.
 - **Zero-dependency fallback**: for contributors who can't install lefthook. Wire native git to the shared scripts:
   ```bash
   git config --local core.hooksPath .githooks

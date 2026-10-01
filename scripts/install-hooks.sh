@@ -54,9 +54,9 @@ If you'd like this repo's lint/format/typecheck/commitlint hooks to
 fire in addition, opt in locally. Both options affect THIS clone
 only and can be reversed with `git config --local --unset core.hooksPath`.
 
-  # Lefthook path (parallel, staged-files-aware, requires `npx lefthook`):
+  # Lefthook path (parallel, staged-files-aware, fetched on demand by npx):
   git config --local core.hooksPath .git/hooks
-  npx lefthook install --force
+  npx --yes lefthook@2.1.6 install --force
 
   # Zero-dependency fallback (sequential, whole-tree, no lefthook needed):
   git config --local core.hooksPath .githooks
@@ -108,7 +108,11 @@ if [ -n "$hooks_path" ]; then
   fi
 fi
 
-if npx lefthook install; then
+# lefthook is deliberately NOT a devDependency: its npm package runs
+# `lefthook install -f` from its own postinstall whenever CI is unset,
+# bypassing every check above and writing into a global hooksPath.
+# Fetch a pinned copy on demand instead, only after the checks pass.
+if npx --yes lefthook@2.1.6 install; then
   exit 0
 fi
 
